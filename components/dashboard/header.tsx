@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import { Bell, Search, Sparkles, Flame, Zap } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -23,8 +24,15 @@ interface HeaderProps {
 }
 
 export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps) {
+  const router = useRouter()
   const xpForNextLevel = userLevel * 1000
   const progress = (totalXP % 1000) / 10
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" })
+    router.push("/login")
+    router.refresh()
+  }
   
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b border-border bg-card/95 backdrop-blur-sm px-6 py-3">
@@ -133,7 +141,7 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
             <DropdownMenuItem>Settings</DropdownMenuItem>
             <DropdownMenuItem>Learning History</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">Log out</DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive" onClick={handleLogout}>Log out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

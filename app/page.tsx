@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Header } from "@/components/dashboard/header"
 import { SidebarNav } from "@/components/dashboard/sidebar-nav"
 import { StatsOverview } from "@/components/dashboard/stats-overview"
@@ -15,6 +15,15 @@ import { CourseRecommendations } from "@/components/dashboard/course-recommendat
 import { DashboardFilters } from "@/components/dashboard/filters"
 import { userData } from "@/lib/data"
 
+interface SessionUser {
+  handle: string
+  firstName?: string
+  lastName?: string
+  rank?: string
+  maxRating?: number
+  avatar?: string
+}
+
 export default function DashboardPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [filters, setFilters] = useState({
@@ -22,6 +31,20 @@ export default function DashboardPage() {
     category: "all",
     sortBy: "retention"
   })
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.handle) setSessionUser(data)
+      })
+      .catch(() => { /* middleware already guarantees auth; silently ignore */ })
+  }, [])
+
+  const displayName = sessionUser
+    ? [sessionUser.firstName, sessionUser.lastName].filter(Boolean).join(" ") || sessionUser.handle
+    : userData.name
 
   return (
     <div className="flex h-screen bg-background">
@@ -32,7 +55,7 @@ export default function DashboardPage() {
       
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header 
-          userName={userData.name}
+          userName={displayName}
           userLevel={userData.level}
           xp={userData.xpToday}
           streak={userData.streak}
@@ -46,7 +69,7 @@ export default function DashboardPage() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                 <div>
                   <h1 className="text-2xl font-bold text-foreground">
-                    Welcome back, {userData.name.split(" ")[0]}!
+                    Welcome back, {(sessionUser?.firstName ?? displayName.split(" ")[0])}!
                   </h1>
                   <p className="text-muted-foreground mt-1">
                     Here&apos;s your skill retention overview for this week
