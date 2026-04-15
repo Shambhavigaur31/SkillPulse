@@ -7,9 +7,15 @@ const JWT_SECRET = new TextEncoder().encode(
 )
 
 /** Routes that are always publicly accessible (no JWT required). */
-const PUBLIC_PATHS = ["/login", "/api/auth/login"]
+const PUBLIC_PATHS = [
+  "/login",
+  "/link-codeforces",
+  "/api/auth/login",
+  "/api/auth/google/start",
+  "/api/auth/google/callback",
+]
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // API routes should return JSON errors from route handlers, not browser redirects.
@@ -25,7 +31,12 @@ export async function proxy(request: NextRequest) {
   const token = request.cookies.get(COOKIE_NAME)?.value
 
   if (!token) {
-    return NextResponse.redirect(new URL("/login", request.url))
+    const loginUrl = new URL("/login", request.url)
+    const redirectPath = `${pathname}${request.nextUrl.search}`
+    if (redirectPath !== "/") {
+      loginUrl.searchParams.set("redirect", redirectPath)
+    }
+    return NextResponse.redirect(loginUrl)
   }
 
   try {
@@ -33,7 +44,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next()
   } catch {
     // Token invalid or expired; clear it and redirect to login.
-    const response = NextResponse.redirect(new URL("/login", request.url))
+    const loginUrl = new URL("/login", request.url)
+    const redirectPath = `${pathname}${request.nextUrl.search}`
+    if (redirectPath !== "/") {
+      loginUrl.searchParams.set("redirect", redirectPath)
+    }
+    const response = NextResponse.redirect(loginUrl)
     response.cookies.set(COOKIE_NAME, "", { maxAge: 0, path: "/" })
     return response
   }

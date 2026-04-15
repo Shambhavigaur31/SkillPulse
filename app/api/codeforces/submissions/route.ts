@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSession } from "@/lib/auth"
 import { fetchUserSubmissions } from "@/lib/codeforces"
+import { getDecryptedCredentialsByUserId, saveSubmissions } from "@/lib/storage"
 
 const DEFAULT_COUNT = 100
 const MAX_COUNT = 1000
@@ -19,16 +20,31 @@ export async function GET(request: NextRequest) {
     : DEFAULT_COUNT
 
   try {
+    const credentials = await getDecryptedCredentialsByUserId(session.userId)
+    if (!credentials) {
+      return NextResponse.json(
+        { error: "No linked Codeforces credentials found for this user" },
+        { status: 404 }
+      )
+    }
+
     const submissions = await fetchUserSubmissions(
       session.handle,
-      session.apiKey,
-      session.apiSecret,
+      credentials.apiKey,
+      credentials.apiSecret,
       count
+    )
+
+    const insertedCount = await saveSubmissions(
+      session.userId,
+      session.handle,
+      submissions
     )
 
     return NextResponse.json({
       handle: session.handle,
       count: submissions.length,
+      insertedCount,
       submissions,
     })
   } catch (error) {

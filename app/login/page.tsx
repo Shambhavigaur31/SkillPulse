@@ -1,45 +1,22 @@
 "use client"
 
-import { useState, useTransition } from "react"
-import { useRouter } from "next/navigation"
-import { Eye, EyeOff, ExternalLink, Sparkles, AlertCircle, Loader2 } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { Sparkles, AlertCircle, Mail } from "lucide-react"
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const searchParams = useSearchParams()
+  const redirectPath = searchParams.get("redirect")
+  const googleStartHref = redirectPath?.startsWith("/")
+    ? `/api/auth/google/start?redirect=${encodeURIComponent(redirectPath)}`
+    : "/api/auth/google/start"
 
-  const [handle, setHandle] = useState("")
-  const [apiKey, setApiKey] = useState("")
-  const [apiSecret, setApiSecret] = useState("")
-  const [showSecret, setShowSecret] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError(null)
-
-    startTransition(async () => {
-      try {
-        const res = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ handle, apiKey, apiSecret }),
-        })
-
-        const data = await res.json()
-
-        if (!res.ok) {
-          setError(data.error ?? "Login failed. Please check your credentials.")
-          return
-        }
-
-        router.push("/")
-        router.refresh()
-      } catch {
-        setError("Unable to reach the server. Please try again.")
-      }
-    })
-  }
+  const oauthError = searchParams.get("error")
+  const oauthErrorMessage =
+    oauthError === "google_config"
+      ? "Google login is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.local, then restart the server."
+      : oauthError
+      ? "Google login failed. Please try again."
+      : null
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -67,145 +44,27 @@ export default function LoginPage() {
 
           {/* Heading */}
           <div className="mb-6 text-center">
-            <h2 className="text-lg font-semibold text-foreground">Connect your Codeforces account</h2>
+            <h2 className="text-lg font-semibold text-foreground">Sign in to SkillPulse</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              SkillPulse uses your Codeforces API key to verify your identity and fetch submission data.
+              Use your Google account to get started.
             </p>
           </div>
 
-          {/* Error */}
-          {error && (
+          {oauthErrorMessage && (
             <div className="mb-5 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/8 px-4 py-3 text-sm text-destructive">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{error}</span>
+              <span>{oauthErrorMessage}</span>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Handle */}
-            <div className="space-y-1.5">
-              <label htmlFor="handle" className="block text-sm font-medium text-foreground">
-                Codeforces Handle
-              </label>
-              <input
-                id="handle"
-                type="text"
-                autoComplete="username"
-                autoFocus
-                required
-                placeholder="e.g. tourist"
-                value={handle}
-                onChange={(e) => setHandle(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground 
-                           outline-none ring-0 transition-all 
-                           focus:border-primary/60 focus:ring-2 focus:ring-primary/20 
-                           disabled:opacity-50"
-                disabled={isPending}
-              />
-            </div>
-
-            {/* API Key */}
-            <div className="space-y-1.5">
-              <label htmlFor="apiKey" className="block text-sm font-medium text-foreground">
-                API Key
-              </label>
-              <input
-                id="apiKey"
-                type="text"
-                autoComplete="off"
-                required
-                placeholder="64-character hex string"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2.5 font-mono text-sm text-foreground placeholder:text-muted-foreground placeholder:font-sans
-                           outline-none ring-0 transition-all 
-                           focus:border-primary/60 focus:ring-2 focus:ring-primary/20 
-                           disabled:opacity-50"
-                disabled={isPending}
-              />
-            </div>
-
-            {/* API Secret */}
-            <div className="space-y-1.5">
-              <label htmlFor="apiSecret" className="block text-sm font-medium text-foreground">
-                API Secret
-              </label>
-              <div className="relative">
-                <input
-                  id="apiSecret"
-                  type={showSecret ? "text" : "password"}
-                  autoComplete="off"
-                  required
-                  placeholder="64-character hex string"
-                  value={apiSecret}
-                  onChange={(e) => setApiSecret(e.target.value)}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2.5 pr-10 font-mono text-sm text-foreground placeholder:text-muted-foreground placeholder:font-sans
-                             outline-none ring-0 transition-all 
-                             focus:border-primary/60 focus:ring-2 focus:ring-primary/20 
-                             disabled:opacity-50"
-                  disabled={isPending}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSecret((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  tabIndex={-1}
-                  aria-label={showSecret ? "Hide secret" : "Show secret"}
-                >
-                  {showSecret ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={isPending}
-              className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground
-                         shadow-md shadow-primary/25 transition-all 
-                         hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/30 
-                         focus:outline-none focus:ring-2 focus:ring-primary/40 
-                         disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isPending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Connecting…
-                </>
-              ) : (
-                "Connect & Sign In"
-              )}
-            </button>
-          </form>
-
-          {/* Help text */}
-          <div className="mt-6 rounded-lg border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground space-y-1.5">
-            <p className="font-medium text-foreground/70">How to get your API credentials</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li>Log in to Codeforces in your browser</li>
-              <li>
-                Go to{" "}
-                <a
-                  href="https://codeforces.com/settings/api"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:text-primary/80"
-                >
-                  codeforces.com/settings/api
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </li>
-              <li>Click <strong>Add API key</strong> and copy the key + secret</li>
-            </ol>
-            <p className="pt-1 text-[11px]">
-              Your credentials are verified directly with Codeforces and stored only in an
-              encrypted, httpOnly session cookie — never in plaintext on our servers.
-            </p>
-          </div>
+          <a
+            href={googleStartHref}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 py-2.5 text-sm font-semibold text-foreground
+                       transition-all hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/20"
+          >
+            <Mail className="h-4 w-4" />
+            Continue with Google
+          </a>
         </div>
       </div>
     </div>

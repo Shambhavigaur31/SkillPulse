@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { COOKIE_NAME } from "@/lib/auth"
+import { COOKIE_NAME, GOOGLE_PENDING_COOKIE_NAME } from "@/lib/auth"
 
 export async function POST() {
   const response = NextResponse.json({ success: true })
@@ -8,6 +8,14 @@ export async function POST() {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
+    maxAge: 0,
+    path: "/",
+  })
+
+  response.cookies.set(GOOGLE_PENDING_COOKIE_NAME, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
     maxAge: 0,
     path: "/",
   })
