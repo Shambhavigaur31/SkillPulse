@@ -45,15 +45,6 @@ export async function ensureSchema(): Promise<void> {
   `
 
   await sql`
-    create table if not exists cf_credentials (
-      user_id bigint primary key references app_users(id) on delete cascade,
-      encrypted_api_key text not null,
-      encrypted_api_secret text not null,
-      updated_at timestamptz not null default now()
-    )
-  `
-
-  await sql`
     create table if not exists cf_submissions (
       id bigint primary key,
       user_id bigint not null references app_users(id) on delete cascade,

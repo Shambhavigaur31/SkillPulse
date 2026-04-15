@@ -1,6 +1,5 @@
 import { CodeforcesSubmission } from "@/lib/codeforces"
 import { ensureSchema, sql } from "@/lib/db"
-import { decryptValue, encryptValue } from "@/lib/secure-credentials"
 
 interface SessionUserRecord {
   id: number
@@ -14,8 +13,6 @@ interface SessionUserRecord {
 
 interface UpsertUserInput {
   handle: string
-  apiKey: string
-  apiSecret: string
   firstName?: string
   lastName?: string
   rank?: string
@@ -23,7 +20,7 @@ interface UpsertUserInput {
   avatar?: string
 }
 
-export async function upsertUserAndCredentials(input: UpsertUserInput): Promise<number> {
+export async function upsertUser(input: UpsertUserInput): Promise<number> {
   await ensureSchema()
 
   const [user] = await sql<[{ id: number }]>`
@@ -47,44 +44,7 @@ export async function upsertUserAndCredentials(input: UpsertUserInput): Promise<
     returning id
   `
 
-  const encryptedApiKey = encryptValue(input.apiKey)
-  const encryptedApiSecret = encryptValue(input.apiSecret)
-
-  await sql`
-    insert into cf_credentials (user_id, encrypted_api_key, encrypted_api_secret)
-    values (${user.id}, ${encryptedApiKey}, ${encryptedApiSecret})
-    on conflict (user_id)
-    do update set
-      encrypted_api_key = excluded.encrypted_api_key,
-      encrypted_api_secret = excluded.encrypted_api_secret,
-      updated_at = now()
-  `
-
   return user.id
-}
-
-export async function getDecryptedCredentialsByUserId(userId: number): Promise<{
-  apiKey: string
-  apiSecret: string
-} | null> {
-  await ensureSchema()
-
-  const rows = await sql<
-    Array<{ encrypted_api_key: string; encrypted_api_secret: string }>
-  >`
-    select encrypted_api_key, encrypted_api_secret
-    from cf_credentials
-    where user_id = ${userId}
-    limit 1
-  `
-
-  const row = rows[0]
-  if (!row) return null
-
-  return {
-    apiKey: decryptValue(row.encrypted_api_key),
-    apiSecret: decryptValue(row.encrypted_api_secret),
-  }
 }
 
 export async function saveSubmissions(
