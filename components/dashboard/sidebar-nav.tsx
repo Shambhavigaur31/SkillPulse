@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { 
@@ -26,18 +25,17 @@ interface NavItem {
   label: string
   href: string
   badge?: string
-  section?: string
 }
 
 const mainNavItems: NavItem[] = [
-  { icon: <LayoutDashboard className="h-5 w-5" />, label: "Dashboard", href: "/", section: "overview" },
-  { icon: <Brain className="h-5 w-5" />, label: "My Skills", href: "/skills", section: "skills" },
-  { icon: <GitBranch className="h-5 w-5" />, label: "Skill Graph", href: "/#dependency-graph", section: "dependency-graph" },
-  { icon: <Target className="h-5 w-5" />, label: "Practice", href: "/practice", badge: "5", section: "practice" },
-  { icon: <BarChart3 className="h-5 w-5" />, label: "Analytics", href: "/analytics", section: "analytics" },
-  { icon: <Trophy className="h-5 w-5" />, label: "Achievements", href: "/#achievements", section: "achievements" },
-  { icon: <Users className="h-5 w-5" />, label: "Leaderboard", href: "/#leaderboard", section: "leaderboard" },
-  { icon: <GraduationCap className="h-5 w-5" />, label: "Courses", href: "/#courses", section: "courses" },
+  { icon: <LayoutDashboard className="h-5 w-5" />, label: "Dashboard", href: "/" },
+  { icon: <Brain className="h-5 w-5" />, label: "My Skills", href: "/skills" },
+  { icon: <GitBranch className="h-5 w-5" />, label: "Skill Graph", href: "/skill-graph" },
+  { icon: <Target className="h-5 w-5" />, label: "Practice", href: "/practice", badge: "5" },
+  { icon: <BarChart3 className="h-5 w-5" />, label: "Analytics", href: "/analytics" },
+  { icon: <Trophy className="h-5 w-5" />, label: "Achievements", href: "/achievements" },
+  { icon: <Users className="h-5 w-5" />, label: "Leaderboard", href: "/leaderboard" },
+  { icon: <GraduationCap className="h-5 w-5" />, label: "Courses", href: "/courses" },
   { icon: <BookOpen className="h-5 w-5" />, label: "Resources", href: "/resources" },
 ]
 
@@ -53,24 +51,9 @@ interface SidebarNavProps {
 
 export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
   const pathname = usePathname()
-  const [activeItem, setActiveItem] = useState("Dashboard")
-  
-  const handleNavClick = (item: NavItem) => {
-    setActiveItem(item.label)
-    
-    // Handle scroll to section for hash links
-    if (item.href.includes('#')) {
-      const sectionId = item.href.split('#')[1]
-      const element = document.getElementById(sectionId)
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    }
-  }
 
   const isActive = (item: NavItem) => {
     if (item.href === '/') return pathname === '/'
-    if (item.href.startsWith('/#')) return pathname === '/' && activeItem === item.label
     return pathname.startsWith(item.href)
   }
   
@@ -104,7 +87,6 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
               <Link
                 key={item.label}
                 href={item.href}
-                onClick={() => handleNavClick(item)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                   active 
