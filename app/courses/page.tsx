@@ -1,13 +1,5 @@
-import { DashboardShell } from "@/components/dashboard/dashboard-shell"
-import { CourseRecommendations } from "@/components/dashboard/course-recommendations"
+import { LearningHubPage } from "@/components/dashboard/learning-hub-page"
 
 export default function CoursesPage() {
-  return (
-    <DashboardShell
-      title="Courses"
-      description="Pick targeted learning resources aligned with your current skill gaps."
-    >
-      <CourseRecommendations />
-    </DashboardShell>
-  )
+  return <LearningHubPage />
 }
