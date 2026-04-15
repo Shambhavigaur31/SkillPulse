@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import {
   signToken,
@@ -8,8 +7,9 @@ import {
   POST_LOGIN_REDIRECT_COOKIE_NAME,
   verifyPendingGoogleToken,
 } from "@/lib/auth"
-import { validateCodeforcesCredentials } from "@/lib/codeforces"
-import { linkGoogleAccountToUser, upsertUserAndCredentials } from "@/lib/storage"
+import { validateCodeforcesHandle } from "@/lib/codeforces"
+import { linkGoogleAccountToUser, upsertUser } from "@/lib/storage"
+import { appError, okJson, toErrorResponse } from "@/lib/api-errors"
 
 function sanitizeRedirectPath(input: string | null): string | null {
   if (!input) return null
@@ -20,34 +20,19 @@ function sanitizeRedirectPath(input: string | null): string | null {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
-    const { handle, apiKey, apiSecret } = body
+    const body = await request.json().catch(() => {
+      throw appError("BAD_REQUEST", "Request body must be valid JSON.", 400)
+    })
 
-    if (
-      typeof handle !== "string" ||
-      typeof apiKey !== "string" ||
-      typeof apiSecret !== "string" ||
-      !handle.trim() ||
-      !apiKey.trim() ||
-      !apiSecret.trim()
-    ) {
-      return NextResponse.json(
-        { error: "handle, apiKey, and apiSecret are required" },
-        { status: 400 }
-      )
+    const handle = typeof body?.handle === "string" ? body.handle.trim() : ""
+    if (!handle) {
+      throw appError("MISSING_HANDLE", "Please enter your Codeforces handle.", 400)
     }
 
-    // Verify credentials against Codeforces — throws if invalid
-    const cfUser = await validateCodeforcesCredentials(
-      handle.trim(),
-      apiKey.trim(),
-      apiSecret.trim()
-    )
+    const cfUser = await validateCodeforcesHandle(handle)
 
-    const userId = await upsertUserAndCredentials({
+    const userId = await upsertUser({
       handle: cfUser.handle,
-      apiKey: apiKey.trim(),
-      apiSecret: apiSecret.trim(),
       firstName: cfUser.firstName,
       lastName: cfUser.lastName,
       rank: cfUser.rank,
@@ -71,8 +56,9 @@ export async function POST(request: Request) {
     const redirectTo =
       sanitizeRedirectPath(cookieStore.get(POST_LOGIN_REDIRECT_COOKIE_NAME)?.value) ?? "/"
 
-    const response = NextResponse.json({
-      success: true,
+    const response = okJson({
+      message: "Codeforces handle linked successfully",
+      handle: cfUser.handle,
       redirectTo,
       user: {
         handle: cfUser.handle,
@@ -116,8 +102,6 @@ export async function POST(request: Request) {
 
     return response
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Authentication failed"
-    return NextResponse.json({ error: message }, { status: 401 })
+    return toErrorResponse(error, "api/auth/login")
   }
 }

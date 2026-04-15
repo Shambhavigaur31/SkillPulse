@@ -1,23 +1,10 @@
 "use client"
 
+import { Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Sparkles, AlertCircle, Mail } from "lucide-react"
 
-export default function LoginPage() {
-  const searchParams = useSearchParams()
-  const redirectPath = searchParams.get("redirect")
-  const googleStartHref = redirectPath?.startsWith("/")
-    ? `/api/auth/google/start?redirect=${encodeURIComponent(redirectPath)}`
-    : "/api/auth/google/start"
-
-  const oauthError = searchParams.get("error")
-  const oauthErrorMessage =
-    oauthError === "google_config"
-      ? "Google login is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.local, then restart the server."
-      : oauthError
-      ? "Google login failed. Please try again."
-      : null
-
+function LoginCard({ googleStartHref, oauthErrorMessage }: { googleStartHref: string; oauthErrorMessage: string | null }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       {/* Subtle gradient backdrop */}
@@ -31,7 +18,7 @@ export default function LoginPage() {
         <div className="rounded-2xl border border-border bg-card shadow-xl shadow-black/5 p-8">
           {/* Logo */}
           <div className="mb-8 flex flex-col items-center gap-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/70 shadow-lg shadow-primary/30">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-primary to-primary/70 shadow-lg shadow-primary/30">
               <Sparkles className="h-7 w-7 text-primary-foreground" />
             </div>
             <div className="text-center">
@@ -68,5 +55,31 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+function LoginContent() {
+  const searchParams = useSearchParams()
+  const redirectPath = searchParams.get("redirect")
+  const googleStartHref = redirectPath?.startsWith("/")
+    ? `/api/auth/google/start?redirect=${encodeURIComponent(redirectPath)}`
+    : "/api/auth/google/start"
+
+  const oauthError = searchParams.get("error")
+  const oauthErrorMessage =
+    oauthError === "google_config"
+      ? "Google login is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.local, then restart the server."
+      : oauthError
+      ? "Google login failed. Please try again."
+      : null
+
+  return <LoginCard googleStartHref={googleStartHref} oauthErrorMessage={oauthErrorMessage} />
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginCard googleStartHref="/api/auth/google/start" oauthErrorMessage={null} />}>
+      <LoginContent />
+    </Suspense>
   )
 }

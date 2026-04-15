@@ -1,19 +1,25 @@
-import { NextResponse } from "next/server"
 import { getSession } from "@/lib/auth"
+import { appError, okJson, toErrorResponse } from "@/lib/api-errors"
 
 export async function GET() {
-  const session = await getSession()
+  try {
+    const session = await getSession()
 
-  if (!session) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    if (!session) {
+      throw appError("UNAUTHENTICATED", "Please sign in to continue.", 401)
+    }
+
+    return okJson({
+      user: {
+        handle: session.handle,
+        firstName: session.firstName,
+        lastName: session.lastName,
+        rank: session.rank,
+        maxRating: session.maxRating,
+        avatar: session.avatar,
+      },
+    })
+  } catch (error) {
+    return toErrorResponse(error, "api/auth/me")
   }
-
-  return NextResponse.json({
-    handle: session.handle,
-    firstName: session.firstName,
-    lastName: session.lastName,
-    rank: session.rank,
-    maxRating: session.maxRating,
-    avatar: session.avatar,
-  })
 }
