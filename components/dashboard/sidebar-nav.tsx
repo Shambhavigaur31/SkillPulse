@@ -11,7 +11,6 @@ import {
   HelpCircle,
   ChevronLeft,
   BarChart3,
-  BookOpen,
   Users,
   GraduationCap,
   GitBranch
@@ -30,13 +29,12 @@ interface NavItem {
 const mainNavItems: NavItem[] = [
   { icon: <LayoutDashboard className="h-5 w-5" />, label: "Dashboard", href: "/" },
   { icon: <Brain className="h-5 w-5" />, label: "My Skills", href: "/skills" },
-  { icon: <GitBranch className="h-5 w-5" />, label: "Skill Graph", href: "/skill-graph" },
+  { icon: <GitBranch className="h-5 w-5" />, label: "Skill Graph", href: "/skill-graph", badge: "Soon" },
   { icon: <Target className="h-5 w-5" />, label: "Practice", href: "/practice", badge: "5" },
   { icon: <BarChart3 className="h-5 w-5" />, label: "Analytics", href: "/analytics" },
   { icon: <Trophy className="h-5 w-5" />, label: "Achievements", href: "/achievements" },
   { icon: <Users className="h-5 w-5" />, label: "Leaderboard", href: "/leaderboard" },
-  { icon: <GraduationCap className="h-5 w-5" />, label: "Courses", href: "/courses" },
-  { icon: <BookOpen className="h-5 w-5" />, label: "Resources", href: "/resources" },
+  { icon: <GraduationCap className="h-5 w-5" />, label: "Learning Hub", href: "/courses" },
 ]
 
 const bottomNavItems: NavItem[] = [
@@ -61,7 +59,7 @@ export function SidebarNav({ collapsed, onToggle }: SidebarNavProps) {
     <TooltipProvider delayDuration={0}>
       <aside className={cn(
         "flex h-screen flex-col border-r border-border bg-card transition-all duration-300 ease-in-out",
-        collapsed ? "w-[72px]" : "w-[260px]"
+        collapsed ? "w-18" : "w-65"
       )}>
         <div className="flex h-16 items-center justify-between border-b border-border px-4">
           {!collapsed && (

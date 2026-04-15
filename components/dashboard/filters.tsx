@@ -67,7 +67,7 @@ export function DashboardFilters({ filters, onFilterChange }: FiltersProps) {
         value={filters.timeRange}
         onValueChange={(value) => onFilterChange({ ...filters, timeRange: value })}
       >
-        <SelectTrigger className="w-[160px] bg-card border-border">
+        <SelectTrigger className="w-40 bg-card border-border">
           <Calendar className="h-4 w-4 mr-2 text-muted-foreground" />
           <SelectValue />
         </SelectTrigger>
@@ -85,7 +85,7 @@ export function DashboardFilters({ filters, onFilterChange }: FiltersProps) {
         value={filters.category}
         onValueChange={(value) => onFilterChange({ ...filters, category: value })}
       >
-        <SelectTrigger className="w-[170px] bg-card border-border">
+        <SelectTrigger className="w-42.5 bg-card border-border">
           <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
           <SelectValue />
         </SelectTrigger>
