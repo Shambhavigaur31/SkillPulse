@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { Space_Grotesk, JetBrains_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
+import { Toaster } from '@/components/ui/toaster'
 import './globals.css'
 
-const inter = Inter({ 
+const spaceGrotesk = Space_Grotesk({ 
   subsets: ["latin"],
   variable: "--font-sans"
 });
@@ -17,7 +18,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'SkillPulse - AI Skill Decay Detection',
   description: 'Detect and prevent silent skill decay in CS students with AI-powered cognitive science insights',
-  generator: 'v0.app',
+  generator: 'SkillPulse',
 }
 
 export default function RootLayout({
@@ -27,14 +28,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+      <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >
           {children}
+          <Toaster />
         </ThemeProvider>
         <Analytics />
       </body>

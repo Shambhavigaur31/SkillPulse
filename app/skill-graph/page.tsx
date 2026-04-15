@@ -1,13 +1,26 @@
 import { DashboardShell } from "@/components/dashboard/dashboard-shell"
-import { SkillDependencyGraph } from "@/components/dashboard/skill-dependency-graph"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 
 export default function SkillGraphPage() {
   return (
     <DashboardShell
       title="Skill Graph"
-      description="Understand how weak foundations can cascade across connected topics."
+      description="Dependency visualization is planned for a future release."
     >
-      <SkillDependencyGraph />
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Skill Graph</CardTitle>
+            <Badge variant="outline">Coming Soon</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            We are currently focusing on ARS-based recommendations and action planning. Dependency and cascade views will return in a later milestone.
+          </p>
+        </CardContent>
+      </Card>
     </DashboardShell>
   )
 }

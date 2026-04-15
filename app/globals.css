@@ -28,7 +28,7 @@
   --chart-3: oklch(0.70 0.18 45);
   --chart-4: oklch(0.60 0.22 25);
   --chart-5: oklch(0.58 0.20 300);
-  --radius: 0.75rem;
+  --radius: 1rem;
   --sidebar: oklch(0.98 0.005 240);
   --sidebar-foreground: oklch(0.25 0.02 250);
   --sidebar-primary: oklch(0.55 0.18 250);
@@ -50,24 +50,24 @@
 }
 
 .dark {
-  --background: oklch(0.13 0.015 250);
+  --background: oklch(0.12 0.018 252);
   --foreground: oklch(0.95 0.01 240);
-  --card: oklch(0.17 0.015 250);
+  --card: oklch(0.16 0.015 250);
   --card-foreground: oklch(0.95 0.01 240);
-  --popover: oklch(0.17 0.015 250);
+  --popover: oklch(0.16 0.015 250);
   --popover-foreground: oklch(0.95 0.01 240);
-  --primary: oklch(0.65 0.18 250);
+  --primary: oklch(0.69 0.18 247);
   --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.22 0.02 250);
+  --secondary: oklch(0.2 0.02 250);
   --secondary-foreground: oklch(0.90 0.01 240);
-  --muted: oklch(0.25 0.02 250);
+  --muted: oklch(0.24 0.02 250);
   --muted-foreground: oklch(0.65 0.02 250);
-  --accent: oklch(0.55 0.18 165);
+  --accent: oklch(0.58 0.17 168);
   --accent-foreground: oklch(0.98 0 0);
   --destructive: oklch(0.55 0.22 25);
   --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.28 0.02 250);
-  --input: oklch(0.25 0.02 250);
+  --border: oklch(0.3 0.02 250);
+  --input: oklch(0.24 0.02 250);
   --ring: oklch(0.65 0.18 250);
   --chart-1: oklch(0.65 0.18 250);
   --chart-2: oklch(0.55 0.18 165);
@@ -95,7 +95,7 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-sans), 'Inter', system-ui, sans-serif;
+  --font-sans: var(--font-sans), 'Space Grotesk', system-ui, sans-serif;
   --font-mono: var(--font-mono), 'JetBrains Mono', monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -149,5 +149,89 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(1100px 500px at 15% -15%, oklch(0.69 0.18 247 / 0.14), transparent 60%),
+      radial-gradient(900px 450px at 90% -20%, oklch(0.58 0.17 168 / 0.12), transparent 60%),
+      linear-gradient(to bottom, oklch(0.13 0.02 252), oklch(0.11 0.015 252));
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  .premium-surface {
+    @apply rounded-2xl border border-white/10 bg-white/4 shadow-xl shadow-black/15 backdrop-blur-sm;
+    background-image: linear-gradient(130deg, rgb(255 255 255 / 0.03), rgb(255 255 255 / 0.01));
+  }
+
+  .premium-card-hover {
+    @apply transition-all duration-200 ease-in-out hover:-translate-y-1 hover:scale-[1.015] hover:shadow-2xl hover:shadow-black/20;
+  }
+
+  .section-fade-in {
+    animation: sectionFadeIn 420ms ease-out both;
+  }
+
+  .interactive-focus {
+    @apply cursor-pointer transition-all duration-200 ease-in-out hover:brightness-110;
+  }
+
+  .skeleton-shimmer {
+    background-size: 220% 100%;
+    animation: shimmer 1.4s ease-in-out infinite, skeletonPulse 1.8s ease-in-out infinite;
+  }
+
+  .critical-pulse {
+    animation: criticalPulse 1.7s ease-in-out infinite;
+  }
+}
+
+@keyframes sectionFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes skeletonPulse {
+  0%,
+  100% {
+    opacity: 0.82;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes criticalPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(239 68 68 / 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgb(239 68 68 / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .premium-card-hover,
+  .section-fade-in,
+  .skeleton-shimmer,
+  .critical-pulse {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }
