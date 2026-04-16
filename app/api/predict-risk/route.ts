@@ -15,6 +15,22 @@ type SkillRisk = RawPrediction & {
   risk: "SAFE" | "GENTLE" | "AT_RISK" | "CRITICAL" | "SEVERE"
 }
 
+const CASCADE_WEIGHT = 0.5
+const SKILL_GRAPH: Record<string, string[]> = {
+  greedy: ["brute force"],
+  dp: ["greedy"],
+  graphs: ["dp"],
+  trees: ["graphs"],
+  "number theory": ["math"],
+  combinatorics: ["math"],
+  "binary search": ["greedy"],
+  "two pointers": ["greedy"],
+  bitmasks: ["dp"],
+  "dfs and similar": ["graphs"],
+  dsu: ["data structures"],
+  "data structures": ["implementation"],
+}
+
 function mapRisk(ars: number): SkillRisk["risk"] {
   if (ars < 40) return "SAFE"
   if (ars < 55) return "GENTLE"
@@ -64,6 +80,35 @@ function parsePredictions(stdout: string): RawPrediction[] {
     }))
 }
 
+function applyCascadeRisk(predictions: RawPrediction[]): RawPrediction[] {
+  const base = new Map<string, number>()
+  for (const p of predictions) {
+    base.set(p.skill, Math.max(0, Math.min(100, p.ars)))
+  }
+  const memo = new Map<string, number>()
+  const visiting = new Set<string>()
+
+  const cascaded = (skill: string): number => {
+    if (memo.has(skill)) return memo.get(skill) as number
+    if (visiting.has(skill)) return base.get(skill) ?? 0
+    visiting.add(skill)
+    const parents = SKILL_GRAPH[skill] ?? []
+    const parentMean =
+      parents.length > 0
+        ? parents.reduce((sum, parent) => sum + cascaded(parent), 0) / parents.length
+        : 0
+    const value = Math.max(0, Math.min(100, (base.get(skill) ?? 0) + CASCADE_WEIGHT * parentMean))
+    visiting.delete(skill)
+    memo.set(skill, value)
+    return value
+  }
+
+  return predictions.map((p) => ({
+    skill: p.skill,
+    ars: cascaded(p.skill),
+  }))
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => {
@@ -90,7 +135,8 @@ export async function POST(request: Request) {
       )
 
       const rawSkills = parsePredictions((stdout || "").trim())
-      const skills: SkillRisk[] = rawSkills.map((s) => ({
+      const adjustedSkills = applyCascadeRisk(rawSkills)
+      const skills: SkillRisk[] = adjustedSkills.map((s) => ({
         ...s,
         risk: mapRisk(s.ars),
       }))
