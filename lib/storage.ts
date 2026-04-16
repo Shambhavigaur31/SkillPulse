@@ -20,6 +20,19 @@ interface UpsertUserInput {
   avatar?: string
 }
 
+interface InferenceSkillOutput {
+  skill: string
+  ars: number
+  risk: string
+}
+
+interface InferenceSummaryOutput {
+  skillsTracked: number
+  critical: number
+  atRisk: number
+  overallHealth: number
+}
+
 export async function upsertUser(input: UpsertUserInput): Promise<number> {
   await ensureSchema()
 
@@ -68,6 +81,49 @@ export async function saveSubmissions(
     programming_language: s.programmingLanguage,
     creation_time: new Date(s.creationTimeSeconds * 1000),
     raw: JSON.stringify(s),
+  }))
+
+  const inserted = await sql`
+    insert into cf_submissions ${sql(rows)}
+    on conflict (id) do nothing
+    returning id
+  `
+
+  return inserted.length
+}
+
+export async function saveInferenceOutputToSubmissions(
+  userId: number,
+  handle: string,
+  skills: InferenceSkillOutput[],
+  summary: InferenceSummaryOutput
+): Promise<number> {
+  await ensureSchema()
+  if (!skills.length) return 0
+
+  const baseId = -Date.now()
+  const now = new Date()
+
+  const rows = skills.map((s, idx) => ({
+    id: baseId - idx,
+    user_id: userId,
+    cf_handle: handle,
+    contest_id: null,
+    problem_index: "INFER",
+    problem_name: `skill:${s.skill}`,
+    problem_type: "INFERENCE",
+    tags: [s.skill],
+    verdict: s.risk,
+    programming_language: "skillpulse-inference",
+    creation_time: now,
+    raw: JSON.stringify({
+      source: "inference",
+      skill: s.skill,
+      ars: s.ars,
+      risk: s.risk,
+      summary,
+      createdAt: now.toISOString(),
+    }),
   }))
 
   const inserted = await sql`
