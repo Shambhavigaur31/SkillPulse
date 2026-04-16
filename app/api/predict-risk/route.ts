@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { appError, okJson, toErrorResponse } from "@/lib/api-errors"
+import { getSession } from "@/lib/auth"
+import { saveInferenceOutputToSubmissions } from "@/lib/storage"
 
 const execFileAsync = promisify(execFile)
 
@@ -103,6 +105,15 @@ export async function POST(request: Request) {
         critical,
         atRisk,
         overallHealth: Math.round(100 - meanArs),
+      }
+
+      try {
+        const session = await getSession()
+        if (session && session.handle.toLowerCase() === handle.toLowerCase()) {
+          await saveInferenceOutputToSubmissions(session.userId, session.handle, skills, summary)
+        }
+      } catch (persistError) {
+        console.warn("[api/predict-risk] Failed to persist inference output", persistError)
       }
 
       if (skills.length === 0) {
