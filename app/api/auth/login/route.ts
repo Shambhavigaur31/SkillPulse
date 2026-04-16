@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     const cookieStore = await cookies()
     const pendingGoogleToken = cookieStore.get(GOOGLE_PENDING_COOKIE_NAME)?.value
     const redirectTo =
-      sanitizeRedirectPath(cookieStore.get(POST_LOGIN_REDIRECT_COOKIE_NAME)?.value) ?? "/"
+      sanitizeRedirectPath(cookieStore.get(POST_LOGIN_REDIRECT_COOKIE_NAME)?.value ?? null) ?? "/"
 
     const response = okJson({
       message: "Codeforces handle linked successfully",

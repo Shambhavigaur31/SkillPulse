@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     const linkedUser = await getLinkedUserByGoogleSub(googleUser.sub)
     const redirectPath =
-      sanitizeRedirectPath(request.cookies.get(POST_LOGIN_REDIRECT_COOKIE_NAME)?.value) ?? "/"
+      sanitizeRedirectPath(request.cookies.get(POST_LOGIN_REDIRECT_COOKIE_NAME)?.value ?? null) ?? "/"
 
     if (linkedUser) {
       const sessionToken = await signToken({

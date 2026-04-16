@@ -32,7 +32,8 @@ export function DashboardShell({ children, title, description, insight, statusCh
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then((data) => {
-        if (data.handle) setSessionUser(data)
+        const user = data.user ?? data
+        if (user.handle) setSessionUser(user)
       })
       .catch(() => {
         // proxy already guarantees auth; silently ignore
