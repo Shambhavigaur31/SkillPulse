@@ -43,6 +43,89 @@ VERDICT_MAP = {
     "PRESENTATION_ERROR": 0.0,
 }
 
+# Canonical model skill vocabulary (20 classes).
+CANONICAL_SKILLS = [
+    "greedy",
+    "math",
+    "implementation",
+    "constructive algorithms",
+    "brute force",
+    "dp",
+    "data structures",
+    "binary search",
+    "sortings",
+    "number theory",
+    "dfs and similar",
+    "graphs",
+    "strings",
+    "two pointers",
+    "bitmasks",
+    "trees",
+    "combinatorics",
+    "unk",
+    "dsu",
+    "interactive",
+]
+CANONICAL_SKILLS_SET = set(CANONICAL_SKILLS)
+
+# Raw Codeforces tag -> canonical model skill.
+TAG_TO_SKILL = {
+    "greedy": "greedy",
+    "math": "math",
+    "implementation": "implementation",
+    "constructive algorithms": "greedy",
+    "brute force": "brute force",
+    "dp": "dp",
+    "data structures": "data structures",
+    "binary search": "binary search",
+    "sortings": "sortings",
+    "number theory": "number theory",
+    "dfs and similar": "graphs",
+    "graphs": "graphs",
+    "strings": "strings",
+    "string suffix structures": "strings",
+    "expression parsing": "strings",
+    "two pointers": "two pointers",
+    "bitmasks": "bitmasks",
+    "trees": "trees",
+    "combinatorics": "combinatorics",
+    "probabilities": "math",
+    "geometry": "math",
+    "matrices": "implementation",
+    "hashing": "strings",
+    "divide and conquer": "brute force",
+    "meet-in-the-middle": "brute force",
+    "fft": "math",
+    "shortest paths": "graphs",
+    "graph matchings": "graphs",
+    "flows": "graphs",
+    "schedules": "greedy",
+    "games": "dp",
+    "ternary search": "binary search",
+    "chinese remainder theorem": "number theory",
+    "dsu": "data structures",
+    "interactive": "interactive",
+    "special": "unk",
+    "*special": "unk",
+}
+
+# DAG where each key skill depends on the listed parent skills.
+SKILL_GRAPH = {
+    "greedy": ["brute force"],
+    "dp": ["greedy"],
+    "graphs": ["dp"],
+    "trees": ["graphs"],
+    "number theory": ["math"],
+    "combinatorics": ["math"],
+    "binary search": ["greedy"],
+    "two pointers": ["greedy"],
+    "bitmasks": ["dp"],
+    "dfs and similar": ["graphs"],
+    "dsu": ["data structures"],
+    "data structures": ["implementation"],
+}
+CASCADE_WEIGHT = 0.5
+
 
 # 3. Model + scaler loading
 def focal_mse(y_true, y_pred):
@@ -105,6 +188,105 @@ def debug_synthetic_probes(model) -> None:
     print(f"[debug]   high activity  -> {p_high:.6f}")
 
 
+def map_tag(tag: str) -> str:
+    # Step 1: normalize raw input for stable matching.
+    normalized = str(tag).strip().lower()
+
+    # Step 2: exact dictionary match (backward compatible behavior).
+    exact = TAG_TO_SKILL.get(normalized)
+    if exact in CANONICAL_SKILLS_SET:
+        return exact
+
+    # Step 3: keyword-based fallback mapping for unseen/variant tags.
+    keyword_fallback_rules = [
+        ("tree", "trees"),
+        ("graph", "graphs"),
+        ("string", "strings"),
+        ("math", "math"),
+        ("sort", "sortings"),
+        ("search", "binary search"),
+        ("pointer", "two pointers"),
+        ("bit", "bitmasks"),
+        ("comb", "combinatorics"),
+        ("number", "number theory"),
+        ("dsu", "data structures"),
+        ("greedy", "greedy"),
+        ("dp", "dp"),
+    ]
+    for needle, mapped_skill in keyword_fallback_rules:
+        if needle in normalized:
+            print(f"[debug] Mapped unknown tag '{normalized}' -> '{mapped_skill}'")
+            return mapped_skill
+
+    # Step 4: smart fallback for related algorithmic terms.
+    smart_fallback_rules = [
+        ("sliding window", "two pointers"),
+        ("prefix", "data structures"),
+        ("suffix", "data structures"),
+        ("hashing", "data structures"),
+    ]
+    for needle, mapped_skill in smart_fallback_rules:
+        if needle in normalized:
+            print(f"[debug] Mapped unknown tag '{normalized}' -> '{mapped_skill}'")
+            return mapped_skill
+
+    # Step 5: final fallback.
+    return "unk"
+
+
+def map_tags_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    out = df.copy()
+    out["raw_tag"] = out["tag"].astype(str)
+    out["tag"] = out["raw_tag"].map(map_tag)
+    return out
+
+
+def _assert_graph_acyclic(graph: Dict[str, List[str]]) -> None:
+    state: Dict[str, int] = {}
+
+    def dfs(node: str) -> None:
+        mark = state.get(node, 0)
+        if mark == 1:
+            raise ValueError(f"Cycle detected in SKILL_GRAPH at '{node}'")
+        if mark == 2:
+            return
+        state[node] = 1
+        for parent in graph.get(node, []):
+            dfs(parent)
+        state[node] = 2
+
+    for node in graph:
+        dfs(node)
+
+
+def compute_cascade_risk(ars_dict: Dict[str, float]) -> Dict[str, float]:
+    # Missing skills default to 0 risk.
+    base: Dict[str, float] = {
+        skill: float(np.clip(ars_dict.get(skill, 0.0), 0.0, 100.0))
+        for skill in CANONICAL_SKILLS
+    }
+    memo: Dict[str, float] = {}
+
+    def cascaded(skill: str) -> float:
+        if skill in memo:
+            return memo[skill]
+        parents = SKILL_GRAPH.get(skill, [])
+        if not parents:
+            value = base.get(skill, 0.0)
+        else:
+            parent_mean = float(np.mean([cascaded(parent) for parent in parents]))
+            value = base.get(skill, 0.0) + CASCADE_WEIGHT * parent_mean
+        value = float(np.clip(value, 0.0, 100.0))
+        memo[skill] = value
+        return value
+
+    for skill in CANONICAL_SKILLS:
+        cascaded(skill)
+    return memo
+
+
 # 4. All helper functions (defined before use)
 def fetch_cf_user_status(handle: str) -> List[Dict[str, Any]]:
     url = f"{CF_API_BASE}/user.status?handle={handle}&count=10000"
@@ -156,10 +338,15 @@ def filter_skills(df: pd.DataFrame, skill_mapping: Dict[str, int]) -> pd.DataFra
         return df.copy()
 
     mapping_keys = set(skill_mapping.keys())
-    raw_tags = sorted(df["tag"].astype(str).unique().tolist())
-    intersection = sorted(mapping_keys.intersection(raw_tags))
+    raw_tags = sorted(df["raw_tag"].astype(str).unique().tolist()) if "raw_tag" in df.columns else sorted(df["tag"].astype(str).unique().tolist())
+    canonical_tags = sorted(df["tag"].astype(str).unique().tolist())
+    intersection = sorted(mapping_keys.intersection(canonical_tags))
 
     print(f"[debug] raw unique tags ({len(raw_tags)}): {raw_tags[:30]}{' ...' if len(raw_tags) > 30 else ''}")
+    print(
+        f"[debug] canonical mapped tags ({len(canonical_tags)}): "
+        f"{canonical_tags[:30]}{' ...' if len(canonical_tags) > 30 else ''}"
+    )
     print(f"[debug] skill mapping keys ({len(mapping_keys)}): {sorted(list(mapping_keys))[:30]}{' ...' if len(mapping_keys) > 30 else ''}")
     print(f"[debug] tag intersection count: {len(intersection)}")
 
@@ -277,6 +464,7 @@ def risk_label(ars: float) -> str:
 def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     print(f"\n[debug] === predict_cf_user(handle={handle}) ===")
     skill_mapping = load_skill_mapping()
+    _assert_graph_acyclic(SKILL_GRAPH)
     scaler = load_scaler()
     model = load_model()
     print_model_output_layer_info(model)
@@ -291,6 +479,7 @@ def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
 
     submissions = fetch_cf_user_status(handle)
     df_expanded = expand_submissions_to_rows(submissions, handle)
+    df_expanded = map_tags_to_canonical(df_expanded)
     df_filtered = filter_skills(df_expanded, skill_mapping)
     agg = build_weekly_agg(df_filtered)
 
@@ -311,7 +500,7 @@ def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     end_monday = (end_monday - pd.Timedelta(days=end_monday.dayofweek)).normalize()
     print(f"[debug] sequence end_monday: {end_monday.date()}")
 
-    results: List[Dict[str, Any]] = []
+    base_ars_by_skill: Dict[str, float] = {}
     raw_sigmoid_outputs: List[float] = []
 
     per_feature_before: Dict[str, List[float]] = {f: [] for f in FEATURE_ORDER}
@@ -356,10 +545,16 @@ def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
             raw_sigmoid_outputs.append(pred_sigmoid)
             # Model is trained on y in [0,1], convert back to ARS [0,100].
             ars = float(pred_sigmoid * 100.0)
-            results.append({"skill": skill, "ars": ars, "risk": risk_label(ars)})
+            base_ars_by_skill[skill] = ars
             print(f"[debug] skill={skill} prediction_succeeded sigmoid={pred_sigmoid:.6f} ars={ars:.4f}")
         except Exception as exc:
             print(f"[debug] skill={skill} skipped reason=prediction_failed error={exc}")
+
+    adjusted_ars_by_skill = compute_cascade_risk(base_ars_by_skill)
+    results: List[Dict[str, Any]] = []
+    for skill, ars in base_ars_by_skill.items():
+        adjusted_ars = adjusted_ars_by_skill.get(skill, 0.0)
+        results.append({"skill": skill, "ars": adjusted_ars, "risk": risk_label(adjusted_ars)})
 
     print(f"[debug] total predictions generated: {len(results)}")
 
