@@ -6,6 +6,15 @@ export type SkillRisk = {
   risk: RiskLabel
 }
 
+export type SkillRiskInput = {
+  skill: string
+  ars?: number
+  baseArs?: number
+  cascadedArs?: number
+  cascadeDelta?: number
+  risk?: RiskLabel
+}
+
 export type Summary = {
   skillsTracked: number
   critical: number
@@ -76,11 +85,24 @@ export function riskFromArs(ars: number): RiskLabel {
   return "SEVERE"
 }
 
-export function normalizeSkills(skills: Array<{ skill: string; ars: number; risk?: RiskLabel }>): SkillRisk[] {
+function resolveArsValue(skill: SkillRiskInput): number {
+  const resolved = skill.ars ?? skill.cascadedArs ?? skill.baseArs
+  if (Number.isFinite(resolved)) {
+    return Number(resolved)
+  }
+  if (process.env.NODE_ENV !== "production") {
+    console.warn("[skillpulse] Skill missing ars/cascadedArs/baseArs; defaulting to 0", {
+      skill: skill.skill,
+    })
+  }
+  return 0
+}
+
+export function normalizeSkills(skills: SkillRiskInput[]): SkillRisk[] {
   return skills
-    .filter((s) => typeof s.skill === "string" && Number.isFinite(s.ars))
+    .filter((s) => typeof s.skill === "string" && s.skill.trim().length > 0)
     .map((s) => {
-      const ars = Math.max(0, Math.min(100, Number(s.ars)))
+      const ars = Math.max(0, Math.min(100, resolveArsValue(s)))
       return {
         skill: s.skill,
         ars,
@@ -108,9 +130,13 @@ export function readAnalysisSnapshot(): AnalysisSnapshot | null {
 
 export function writeAnalysisSnapshot(snapshot: AnalysisSnapshot): void {
   if (typeof window === "undefined") return
-  window.localStorage.setItem(ANALYSIS_STORAGE_KEY, JSON.stringify(snapshot))
-  window.localStorage.setItem(HANDLE_STORAGE_KEY, snapshot.handle)
-  const notifications = buildNotifications(snapshot.skills)
+  const normalizedSnapshot: AnalysisSnapshot = {
+    ...snapshot,
+    skills: normalizeSkills(snapshot.skills),
+  }
+  window.localStorage.setItem(ANALYSIS_STORAGE_KEY, JSON.stringify(normalizedSnapshot))
+  window.localStorage.setItem(HANDLE_STORAGE_KEY, normalizedSnapshot.handle)
+  const notifications = buildNotifications(normalizedSnapshot.skills)
   window.localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications))
   window.dispatchEvent(new Event("skillpulse:analysis-updated"))
 }

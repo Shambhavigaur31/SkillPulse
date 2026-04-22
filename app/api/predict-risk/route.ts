@@ -2,33 +2,29 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { appError, okJson, toErrorResponse } from "@/lib/api-errors"
 import { getSession } from "@/lib/auth"
-import { saveInferenceOutputToSubmissions } from "@/lib/storage"
+import {
+  addGamificationEvent,
+  saveInferenceRun,
+  syncAchievements,
+  syncNotificationsFromSkills,
+} from "@/lib/storage"
 
 const execFileAsync = promisify(execFile)
+const INFERENCE_MODEL_VERSION = "phase1-lstm-v1"
 
-type RawPrediction = {
+type ExtendedPrediction = {
+  skill: string
+  baseArs: number
+  cascadedArs: number
+}
+
+type SkillRisk = {
   skill: string
   ars: number
-}
-
-type SkillRisk = RawPrediction & {
+  baseArs: number
+  cascadedArs: number
+  cascadeDelta: number
   risk: "SAFE" | "GENTLE" | "AT_RISK" | "CRITICAL" | "SEVERE"
-}
-
-const CASCADE_WEIGHT = 0.5
-const SKILL_GRAPH: Record<string, string[]> = {
-  greedy: ["brute force"],
-  dp: ["greedy"],
-  graphs: ["dp"],
-  trees: ["graphs"],
-  "number theory": ["math"],
-  combinatorics: ["math"],
-  "binary search": ["greedy"],
-  "two pointers": ["greedy"],
-  bitmasks: ["dp"],
-  "dfs and similar": ["graphs"],
-  dsu: ["data structures"],
-  "data structures": ["implementation"],
 }
 
 function mapRisk(ars: number): SkillRisk["risk"] {
@@ -44,7 +40,7 @@ function normalizeHandle(input: unknown): string {
   return input.trim()
 }
 
-function parsePredictions(stdout: string): RawPrediction[] {
+function parsePredictions(stdout: string): ExtendedPrediction[] {
   let parsed: unknown
   try {
     parsed = JSON.parse(stdout) as unknown
@@ -56,7 +52,14 @@ function parsePredictions(stdout: string): RawPrediction[] {
     )
   }
 
-  if (!Array.isArray(parsed)) {
+  const container =
+    typeof parsed === "object" &&
+    parsed !== null &&
+    Array.isArray((parsed as { skills?: unknown }).skills)
+      ? (parsed as { skills: unknown[] }).skills
+      : parsed
+
+  if (!Array.isArray(container)) {
     throw appError(
       "INVALID_INFERENCE_RESPONSE",
       "We couldn't analyze your skills right now. Please try again.",
@@ -64,49 +67,31 @@ function parsePredictions(stdout: string): RawPrediction[] {
     )
   }
 
-  return parsed
-    .filter((item): item is RawPrediction => {
-      return (
-        typeof item === "object" &&
-        item !== null &&
-        typeof (item as { skill?: unknown }).skill === "string" &&
-        typeof (item as { ars?: unknown }).ars === "number" &&
-        Number.isFinite((item as { ars: number }).ars)
-      )
+  return container
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => {
+      const skill = typeof item.skill === "string" ? item.skill : ""
+      const legacyArs = typeof item.ars === "number" && Number.isFinite(item.ars) ? item.ars : null
+      const baseArs =
+        typeof item.baseArs === "number" && Number.isFinite(item.baseArs)
+          ? item.baseArs
+          : legacyArs
+      const cascadedArs =
+        typeof item.cascadedArs === "number" && Number.isFinite(item.cascadedArs)
+          ? item.cascadedArs
+          : legacyArs
+
+      if (!skill || baseArs === null || cascadedArs === null) {
+        return null
+      }
+
+      return {
+        skill,
+        baseArs: Math.max(0, Math.min(100, baseArs)),
+        cascadedArs: Math.max(0, Math.min(100, cascadedArs)),
+      }
     })
-    .map((item) => ({
-      skill: item.skill,
-      ars: Math.max(0, Math.min(100, item.ars)),
-    }))
-}
-
-function applyCascadeRisk(predictions: RawPrediction[]): RawPrediction[] {
-  const base = new Map<string, number>()
-  for (const p of predictions) {
-    base.set(p.skill, Math.max(0, Math.min(100, p.ars)))
-  }
-  const memo = new Map<string, number>()
-  const visiting = new Set<string>()
-
-  const cascaded = (skill: string): number => {
-    if (memo.has(skill)) return memo.get(skill) as number
-    if (visiting.has(skill)) return base.get(skill) ?? 0
-    visiting.add(skill)
-    const parents = SKILL_GRAPH[skill] ?? []
-    const parentMean =
-      parents.length > 0
-        ? parents.reduce((sum, parent) => sum + cascaded(parent), 0) / parents.length
-        : 0
-    const value = Math.max(0, Math.min(100, (base.get(skill) ?? 0) + CASCADE_WEIGHT * parentMean))
-    visiting.delete(skill)
-    memo.set(skill, value)
-    return value
-  }
-
-  return predictions.map((p) => ({
-    skill: p.skill,
-    ars: cascaded(p.skill),
-  }))
+    .filter((item): item is ExtendedPrediction => item !== null)
 }
 
 export async function POST(request: Request) {
@@ -135,10 +120,13 @@ export async function POST(request: Request) {
       )
 
       const rawSkills = parsePredictions((stdout || "").trim())
-      const adjustedSkills = applyCascadeRisk(rawSkills)
-      const skills: SkillRisk[] = adjustedSkills.map((s) => ({
-        ...s,
-        risk: mapRisk(s.ars),
+      const skills: SkillRisk[] = rawSkills.map((s) => ({
+        skill: s.skill,
+        ars: s.cascadedArs,
+        baseArs: s.baseArs,
+        cascadedArs: s.cascadedArs,
+        cascadeDelta: Math.max(-100, Math.min(100, s.cascadedArs - s.baseArs)),
+        risk: mapRisk(s.cascadedArs),
       }))
 
       const critical = skills.filter((s) => s.ars >= 70).length
@@ -156,10 +144,54 @@ export async function POST(request: Request) {
       try {
         const session = await getSession()
         if (session && session.handle.toLowerCase() === handle.toLowerCase()) {
-          await saveInferenceOutputToSubmissions(session.userId, session.handle, skills, summary)
+          if (process.env.SKILLPULSE_FORCE_PERSIST_FAIL === "1") {
+            throw new Error("Forced persistence failure (SKILLPULSE_FORCE_PERSIST_FAIL=1)")
+          }
+          const persisted = await saveInferenceRun(
+            session.userId,
+            session.handle,
+            INFERENCE_MODEL_VERSION,
+            skills.map((s) => ({
+              skill: s.skill,
+              baseArs: s.baseArs,
+              cascadedArs: s.cascadedArs,
+              cascadeDelta: s.cascadeDelta,
+              risk: s.risk,
+            })),
+            summary
+          )
+          if (persisted.deduped) {
+            console.info("[api/predict-risk] Reused recent inference run", {
+              runId: persisted.runId,
+              handle: session.handle,
+            })
+          } else {
+            await addGamificationEvent({
+              userId: session.userId,
+              eventType: "analysis_run",
+              xpDelta: 25,
+              metadata: {
+                runId: persisted.runId,
+                source: "predict-risk",
+              },
+            })
+            await syncAchievements(session.userId)
+            await syncNotificationsFromSkills(
+              session.userId,
+              persisted.runId,
+              skills.map((s) => ({
+                skill: s.skill,
+                risk: s.risk,
+                ars: s.ars,
+              }))
+            )
+          }
         }
       } catch (persistError) {
-        console.warn("[api/predict-risk] Failed to persist inference output", persistError)
+        console.warn("[api/predict-risk] Persist inference run failed", {
+          handle,
+          error: persistError instanceof Error ? persistError.message : String(persistError),
+        })
       }
 
       if (skills.length === 0) {

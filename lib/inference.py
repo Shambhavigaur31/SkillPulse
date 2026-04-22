@@ -29,6 +29,7 @@ SKILL_MAPPING_PATH = os.path.join(MODELS_DIR, "skill_mapping.json")
 SCALER_PATH = os.path.join(MODELS_DIR, "feature_scalers.pkl")
 MODEL_PATH_KERAS = os.path.join(MODELS_DIR, "lstm_model.keras")
 MODEL_PATH_H5 = os.path.join(MODELS_DIR, "lstm_model.h5")
+MODEL_VERSION = "phase1-lstm-v1"
 
 SEQ_WEEKS = 24
 FEATURE_ORDER = ["solve_count", "success_rate", "difficulty_norm", "raw_attempts"]
@@ -80,7 +81,7 @@ TAG_TO_SKILL = {
     "binary search": "binary search",
     "sortings": "sortings",
     "number theory": "number theory",
-    "dfs and similar": "graphs",
+    "dfs and similar": "dfs and similar",
     "graphs": "graphs",
     "strings": "strings",
     "string suffix structures": "strings",
@@ -103,11 +104,17 @@ TAG_TO_SKILL = {
     "games": "dp",
     "ternary search": "binary search",
     "chinese remainder theorem": "number theory",
-    "dsu": "data structures",
+    "dsu": "dsu",
     "interactive": "interactive",
+    "2-sat": "graphs",
+    "sat": "graphs",
     "special": "unk",
     "*special": "unk",
+    "broken": "unk",
+    "*broken": "unk",
 }
+
+_UNKNOWN_TAG_LOGGED: set[str] = set()
 
 # DAG where each key skill depends on the listed parent skills.
 SKILL_GRAPH = {
@@ -209,13 +216,17 @@ def map_tag(tag: str) -> str:
         ("bit", "bitmasks"),
         ("comb", "combinatorics"),
         ("number", "number theory"),
-        ("dsu", "data structures"),
+        ("dsu", "dsu"),
+        ("2-sat", "graphs"),
+        ("sat", "graphs"),
         ("greedy", "greedy"),
         ("dp", "dp"),
     ]
     for needle, mapped_skill in keyword_fallback_rules:
         if needle in normalized:
-            print(f"[debug] Mapped unknown tag '{normalized}' -> '{mapped_skill}'")
+            if normalized not in _UNKNOWN_TAG_LOGGED:
+                print(f"[debug] Mapped unknown tag '{normalized}' -> '{mapped_skill}'")
+                _UNKNOWN_TAG_LOGGED.add(normalized)
             return mapped_skill
 
     # Step 4: smart fallback for related algorithmic terms.
@@ -227,7 +238,9 @@ def map_tag(tag: str) -> str:
     ]
     for needle, mapped_skill in smart_fallback_rules:
         if needle in normalized:
-            print(f"[debug] Mapped unknown tag '{normalized}' -> '{mapped_skill}'")
+            if normalized not in _UNKNOWN_TAG_LOGGED:
+                print(f"[debug] Mapped unknown tag '{normalized}' -> '{mapped_skill}'")
+                _UNKNOWN_TAG_LOGGED.add(normalized)
             return mapped_skill
 
     # Step 5: final fallback.
@@ -241,6 +254,31 @@ def map_tags_to_canonical(df: pd.DataFrame) -> pd.DataFrame:
     out["raw_tag"] = out["tag"].astype(str)
     out["tag"] = out["raw_tag"].map(map_tag)
     return out
+
+
+def mapping_diagnostics(df: pd.DataFrame) -> Dict[str, Any]:
+    if df.empty:
+        return {
+            "rawTags": [],
+            "canonicalSkills": [],
+            "unmappedTags": [],
+            "mappingCoveragePct": 0.0,
+        }
+
+    raw_tags = sorted(df["raw_tag"].astype(str).unique().tolist()) if "raw_tag" in df.columns else []
+    canonical_skills = sorted(df["tag"].astype(str).unique().tolist())
+
+    unknown_df = df[df["tag"] == "unk"]
+    unmapped_tags = sorted(unknown_df["raw_tag"].astype(str).unique().tolist()) if not unknown_df.empty else []
+
+    coverage = 100.0 if not raw_tags else 100.0 * (1.0 - (len(unmapped_tags) / len(raw_tags)))
+
+    return {
+        "rawTags": raw_tags,
+        "canonicalSkills": canonical_skills,
+        "unmappedTags": unmapped_tags,
+        "mappingCoveragePct": round(float(max(0.0, min(100.0, coverage))), 2),
+    }
 
 
 def _assert_graph_acyclic(graph: Dict[str, List[str]]) -> None:
@@ -481,6 +519,7 @@ def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     df_expanded = expand_submissions_to_rows(submissions, handle)
     df_expanded = map_tags_to_canonical(df_expanded)
     df_filtered = filter_skills(df_expanded, skill_mapping)
+    mapping_info = mapping_diagnostics(df_expanded)
     agg = build_weekly_agg(df_filtered)
 
     if df_filtered.empty:
@@ -490,6 +529,8 @@ def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
             "expanded_rows": len(df_expanded),
             "filtered_rows": 0,
             "unique_filtered_skills": 0,
+            "mapping": mapping_info,
+            "modelVersion": MODEL_VERSION,
         }
 
     end_monday = (
@@ -552,9 +593,21 @@ def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
 
     adjusted_ars_by_skill = compute_cascade_risk(base_ars_by_skill)
     results: List[Dict[str, Any]] = []
+    delta_by_skill: Dict[str, float] = {}
     for skill, ars in base_ars_by_skill.items():
         adjusted_ars = adjusted_ars_by_skill.get(skill, 0.0)
-        results.append({"skill": skill, "ars": adjusted_ars, "risk": risk_label(adjusted_ars)})
+        delta = adjusted_ars - ars
+        delta_by_skill[skill] = delta
+        results.append(
+            {
+                "skill": skill,
+                "ars": adjusted_ars,
+                "baseArs": ars,
+                "cascadedArs": adjusted_ars,
+                "cascadeDelta": delta,
+                "risk": risk_label(adjusted_ars),
+            }
+        )
 
     print(f"[debug] total predictions generated: {len(results)}")
 
@@ -591,6 +644,17 @@ def predict_cf_user(handle: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         "expanded_rows": len(df_expanded),
         "filtered_rows": filtered_rows,
         "unique_filtered_skills": int(df_filtered["tag"].nunique()) if filtered_rows > 0 else 0,
+        "mapping": mapping_info,
+        "modelVersion": MODEL_VERSION,
+        "baseVsCascaded": [
+            {
+                "skill": skill,
+                "baseArs": round(float(base_ars_by_skill[skill]), 4),
+                "cascadedArs": round(float(adjusted_ars_by_skill.get(skill, 0.0)), 4),
+                "delta": round(float(delta_by_skill.get(skill, 0.0)), 4),
+            }
+            for skill in sorted(base_ars_by_skill.keys())
+        ],
     }
     return results, meta
 
@@ -612,6 +676,11 @@ def validate_phase1(handles: List[str]) -> None:
             print(f"filtered rows: {meta['filtered_rows']}")
             print(f"unique filtered skills: {meta['unique_filtered_skills']}")
             print(f"total predicted skills: {len(results)}")
+            mapping = meta.get("mapping", {})
+            print(f"mapping coverage: {mapping.get('mappingCoveragePct', 0.0)}%")
+            print(f"raw tags seen: {mapping.get('rawTags', [])}")
+            print(f"mapped canonical skills: {mapping.get('canonicalSkills', [])}")
+            print(f"unmapped tags: {mapping.get('unmappedTags', [])}")
 
             if ars_vals:
                 print(f"ARS min/max: {min(ars_vals):.2f} / {max(ars_vals):.2f}")
@@ -639,6 +708,11 @@ def validate_phase1(handles: List[str]) -> None:
             print(f"check sequence shape: {'PASS' if shape_ok else 'FAIL'}")
             print(f"check ARS range: {'PASS' if range_ok else 'FAIL'}")
             print(f"check diversity: {'PASS' if diversity_ok else 'FAIL'}")
+            in_range_cascaded = all(
+                0.0 <= float(item.get("cascadedArs", 0.0)) <= 100.0
+                for item in meta.get("baseVsCascaded", [])
+            )
+            print(f"check cascaded ARS range: {'PASS' if in_range_cascaded else 'FAIL'}")
             print("overall: PASS" if (shape_ok and range_ok and len(results) > 0) else "overall: FAIL")
 
         except AssertionError as exc:
@@ -647,19 +721,28 @@ def validate_phase1(handles: List[str]) -> None:
             print(f"overall: FAIL (exception: {exc})")
 
 
-def run_single_handle(handle: str, json_mode: bool) -> int:
+def run_single_handle(handle: str, json_mode: bool, include_meta: bool) -> int:
     try:
         if json_mode:
             # Ensure only JSON is written to stdout in machine mode.
             with contextlib.redirect_stdout(io.StringIO()):
-                results, _ = predict_cf_user(handle)
-            payload = [
-                {
-                    "skill": str(r["skill"]),
-                    "ars": round(float(r["ars"]), 4),
-                }
-                for r in results
-            ]
+                results, meta = predict_cf_user(handle)
+            payload = {
+                "handle": handle,
+                "modelVersion": meta.get("modelVersion", MODEL_VERSION),
+                "skills": [
+                    {
+                        "skill": str(r["skill"]),
+                        "ars": round(float(r["ars"]), 4),
+                        "baseArs": round(float(r.get("baseArs", r["ars"])), 4),
+                        "cascadedArs": round(float(r.get("cascadedArs", r["ars"])), 4),
+                        "cascadeDelta": round(float(r.get("cascadeDelta", 0.0)), 4),
+                    }
+                    for r in results
+                ],
+            }
+            if include_meta:
+                payload["meta"] = meta
             print(json.dumps(payload, separators=(",", ":")))
             return 0
 
@@ -683,12 +766,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SkillPulse inference runner")
     parser.add_argument("--handle", type=str, help="Codeforces handle to run inference for")
     parser.add_argument("--json", action="store_true", help="Output JSON only (stdout)")
+    parser.add_argument(
+        "--include-meta",
+        action="store_true",
+        help="Include diagnostics metadata in JSON output",
+    )
+    parser.add_argument(
+        "--validate-handles",
+        nargs="+",
+        help="Run validation report for one or more handles",
+    )
     args = parser.parse_args()
 
     if args.handle:
-        raise SystemExit(run_single_handle(args.handle.strip(), args.json))
+        raise SystemExit(run_single_handle(args.handle.strip(), args.json, args.include_meta))
+
+    if args.validate_handles:
+        validate_phase1([h.strip() for h in args.validate_handles if h.strip()])
+        raise SystemExit(0)
 
     validate_phase1([
         "shambhavi31",
         "tourist",
+        "Benq",
     ])
