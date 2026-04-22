@@ -29,7 +29,7 @@ interface NavItem {
 const mainNavItems: NavItem[] = [
   { icon: <LayoutDashboard className="h-5 w-5" />, label: "Dashboard", href: "/" },
   { icon: <Brain className="h-5 w-5" />, label: "My Skills", href: "/skills" },
-  { icon: <GitBranch className="h-5 w-5" />, label: "Skill Graph", href: "/skill-graph", badge: "Soon" },
+  { icon: <GitBranch className="h-5 w-5" />, label: "Skill Graph", href: "/skill-graph" },
   { icon: <Target className="h-5 w-5" />, label: "Practice", href: "/practice", badge: "5" },
   { icon: <BarChart3 className="h-5 w-5" />, label: "Analytics", href: "/analytics" },
   { icon: <Trophy className="h-5 w-5" />, label: "Achievements", href: "/achievements" },

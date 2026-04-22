@@ -9,10 +9,10 @@ import { RiskBadge } from "@/components/premium/risk-badge"
 import { SectionHeader } from "@/components/premium/section-header"
 import { Button } from "@/components/ui/button"
 import {
-  ANALYSIS_STORAGE_KEY,
   SkillRisk,
   buildCourseRecommendations,
   buildResourceRecommendations,
+  readAnalysisSnapshot,
 } from "@/lib/skillpulse-product"
 
 type LearningItem = {
@@ -33,13 +33,9 @@ export function LearningHubPage() {
   const [riskFilter, setRiskFilter] = useState<"ALL" | SkillRisk["risk"]>("ALL")
 
   useEffect(() => {
-    const raw = localStorage.getItem(ANALYSIS_STORAGE_KEY)
-    if (!raw) return
-    try {
-      const parsed = JSON.parse(raw) as { skills?: SkillRisk[] }
-      if (Array.isArray(parsed.skills)) setSkills(parsed.skills)
-    } catch {
-      // Ignore malformed local cache
+    const snapshot = readAnalysisSnapshot()
+    if (snapshot?.skills) {
+      setSkills(snapshot.skills)
     }
   }, [])
 

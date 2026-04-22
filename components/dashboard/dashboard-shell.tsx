@@ -5,13 +5,18 @@ import { usePathname } from "next/navigation"
 import { AnimatePresence, motion } from "framer-motion"
 import { Header } from "@/components/dashboard/header"
 import { SidebarNav } from "@/components/dashboard/sidebar-nav"
-import { userData } from "@/lib/data"
 import { Badge } from "@/components/ui/badge"
 
 interface SessionUser {
   handle: string
   firstName?: string
   lastName?: string
+}
+
+interface GamificationProfile {
+  xpTotal: number
+  xpToday: number
+  streak: number
 }
 
 interface DashboardShellProps {
@@ -26,23 +31,43 @@ interface DashboardShellProps {
 export function DashboardShell({ children, title, description, insight, statusChip, actions }: DashboardShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null)
+  const [gamification, setGamification] = useState<GamificationProfile>({
+    xpTotal: 0,
+    xpToday: 0,
+    streak: 0,
+  })
   const pathname = usePathname()
 
   useEffect(() => {
-    fetch("/api/auth/me")
+    fetch("/api/auth/me", { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => {
-        const user = data.user ?? data
-        if (user.handle) setSessionUser(user)
+        const user = data?.user ?? data
+        if (user?.handle) setSessionUser(user)
       })
       .catch(() => {
         // proxy already guarantees auth; silently ignore
+      })
+
+    fetch("/api/gamification/me", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.profile) {
+          setGamification({
+            xpTotal: Number(data.profile.xpTotal ?? 0),
+            xpToday: Number(data.profile.xpToday ?? 0),
+            streak: Number(data.profile.streak ?? 0),
+          })
+        }
+      })
+      .catch(() => {
+        // keep defaults if gamification data is unavailable
       })
   }, [])
 
   const displayName = sessionUser
     ? [sessionUser.firstName, sessionUser.lastName].filter(Boolean).join(" ") || sessionUser.handle
-    : userData.name
+    : "Coder"
 
   const firstName = sessionUser?.firstName ?? displayName.split(" ")[0]
 
@@ -56,10 +81,10 @@ export function DashboardShell({ children, title, description, insight, statusCh
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header
           userName={displayName}
-          userLevel={userData.level}
-          xp={userData.xpToday}
-          streak={userData.streak}
-          totalXP={userData.totalXP}
+          userLevel={Math.max(1, Math.floor(gamification.xpTotal / 500) + 1)}
+          xp={gamification.xpToday}
+          streak={gamification.streak}
+          totalXP={gamification.xpTotal}
         />
 
         <main className="flex-1 overflow-y-auto">

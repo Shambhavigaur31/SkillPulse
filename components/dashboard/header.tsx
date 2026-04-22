@@ -18,10 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   SkillNotification,
-  NOTIFICATIONS_STORAGE_KEY,
   formatRelativeTime,
-  markAllNotificationsRead,
-  readNotifications,
 } from "@/lib/skillpulse-product"
 import { getRiskTheme } from "@/components/premium/risk-theme"
 import { RiskBadge } from "@/components/premium/risk-badge"
@@ -43,16 +40,28 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
   const [isMarkingAll, setIsMarkingAll] = useState(false)
 
   useEffect(() => {
-    function loadNotifications() {
-      setNotifications(readNotifications())
+    let mounted = true
+    async function loadNotifications() {
+      try {
+        const response = await fetch("/api/notifications?limit=50", { cache: "no-store" })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok || !mounted) return
+        if (Array.isArray(data?.notifications)) {
+          setNotifications(data.notifications as SkillNotification[])
+        }
+      } catch {
+        // ignore notification polling failure
+      }
     }
 
-    loadNotifications()
-    window.addEventListener("storage", loadNotifications)
-    window.addEventListener("skillpulse:analysis-updated", loadNotifications)
+    void loadNotifications()
+    const interval = window.setInterval(() => {
+      void loadNotifications()
+    }, 30_000)
+
     return () => {
-      window.removeEventListener("storage", loadNotifications)
-      window.removeEventListener("skillpulse:analysis-updated", loadNotifications)
+      mounted = false
+      window.clearInterval(interval)
     }
   }, [])
 
@@ -62,14 +71,17 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
     [hiddenNotificationIds, notifications]
   )
 
-  function handleMarkRead(notificationId: string) {
-    const next = readNotifications().map((notification) =>
-      notification.id === notificationId ? { ...notification, read: true } : notification
+  async function handleMarkRead(notificationId: string) {
+    await fetch("/api/notifications/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: notificationId }),
+    })
+    setNotifications((prev) =>
+      prev.map((notification) =>
+        notification.id === notificationId ? { ...notification, read: true } : notification
+      )
     )
-
-    window.localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(next))
-    window.dispatchEvent(new Event("skillpulse:analysis-updated"))
-    setNotifications(next)
   }
 
   async function handleMarkAllRead() {
@@ -89,9 +101,9 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
       }, index * 65)
     })
 
-    window.setTimeout(() => {
-      markAllNotificationsRead()
-      setNotifications(readNotifications())
+    window.setTimeout(async () => {
+      await fetch("/api/notifications/read-all", { method: "POST" })
+      setNotifications((prev) => prev.map((notification) => ({ ...notification, read: true })))
       setHiddenNotificationIds(new Set())
       setIsMarkingAll(false)
     }, unread.length * 65 + 220)
