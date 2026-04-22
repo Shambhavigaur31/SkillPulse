@@ -26,7 +26,6 @@ import { DashboardShell } from "@/components/dashboard/dashboard-shell"
 import { DashboardFilters } from "@/components/dashboard/filters"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { MetricCard } from "@/components/premium/metric-card"
 import { SectionHeader } from "@/components/premium/section-header"
 import { RiskBadge } from "@/components/premium/risk-badge"
@@ -39,13 +38,13 @@ import { LoadingSkeleton } from "@/components/premium/loading-skeleton"
 import { useToast } from "@/hooks/use-toast"
 import { getApiErrorCode, getApiErrorMessage, toProductMessage } from "@/lib/api-client"
 import {
-  HANDLE_STORAGE_KEY,
   SkillRisk,
   Summary,
   bucketCounts,
   buildCourseRecommendations,
   buildPracticeRecommendations,
   buildResourceRecommendations,
+  normalizeSkills,
   readAnalysisSnapshot,
   writeAnalysisSnapshot,
 } from "@/lib/skillpulse-product"
@@ -87,7 +86,8 @@ export default function DashboardPage() {
     sortBy: "retention",
   })
 
-  const [handle, setHandle] = useState("")
+  const [sessionHandle, setSessionHandle] = useState("")
+  const [hasLinkedHandle, setHasLinkedHandle] = useState(false)
   const [skills, setSkills] = useState<SkillRisk[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(false)
@@ -101,10 +101,10 @@ export default function DashboardPage() {
   const [activeHealthSlice, setActiveHealthSlice] = useState<string | null>(null)
   const { toast } = useToast()
 
-  async function analyze(currentHandle: string) {
-    const normalizedHandle = currentHandle.trim()
+  async function analyze(currentHandle?: string) {
+    const normalizedHandle = (currentHandle ?? sessionHandle).trim()
     if (!normalizedHandle) {
-      setError("Please enter a Codeforces handle.")
+      setError("Link your Codeforces account to start your skill analysis.")
       return
     }
 
@@ -133,7 +133,7 @@ export default function DashboardPage() {
         return
       }
 
-      const nextSkills = Array.isArray(data.skills) ? (data.skills as SkillRisk[]) : []
+      const nextSkills = Array.isArray(data.skills) ? normalizeSkills(data.skills) : []
       const nextSummary = (data.summary ?? {
         skillsTracked: 0,
         critical: 0,
@@ -161,17 +161,6 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    const savedHandle = localStorage.getItem(HANDLE_STORAGE_KEY) || ""
-    setHandle(savedHandle)
-
-    const snapshot = readAnalysisSnapshot()
-    if (snapshot) {
-      setHandle(snapshot.handle)
-      setSkills(snapshot.skills)
-      setSummary(snapshot.summary)
-      setLastUpdatedLabel("Last analyzed recently")
-    }
-
     async function hydrateFromSession() {
       try {
         const response = await fetch("/api/auth/me", { cache: "no-store" })
@@ -182,9 +171,6 @@ export default function DashboardPage() {
           if (code === "UNAUTHENTICATED") {
             setError("Link your Codeforces account to start your skill analysis.")
           }
-          if (savedHandle) {
-            void analyze(savedHandle)
-          }
           return
         }
 
@@ -192,22 +178,54 @@ export default function DashboardPage() {
           typeof data?.user?.handle === "string" ? data.user.handle.trim() : ""
 
         if (!sessionHandle) {
+          setHasLinkedHandle(false)
+          setSessionHandle("")
           setError("Link your Codeforces account to start your skill analysis.")
           return
         }
 
-        localStorage.setItem(HANDLE_STORAGE_KEY, sessionHandle)
-        setHandle(sessionHandle)
+        setHasLinkedHandle(true)
+        setSessionHandle(sessionHandle)
+        setError(null)
 
-        if (!snapshot || snapshot.handle !== sessionHandle) {
+        const localSnapshot = readAnalysisSnapshot()
+        if (localSnapshot && localSnapshot.handle === sessionHandle) {
+          setSkills(localSnapshot.skills)
+          setSummary(localSnapshot.summary)
+          setLastUpdatedLabel("Loaded from local cache")
+        }
+
+        const latestResponse = await fetch(
+          `/api/predict-risk/latest?handle=${encodeURIComponent(sessionHandle)}`,
+          { cache: "no-store" }
+        )
+        const latestData = await latestResponse.json().catch(() => ({}))
+        const latestSnapshot = latestData?.snapshot
+
+        if (
+          latestResponse.ok &&
+          latestSnapshot &&
+          latestSnapshot.handle === sessionHandle &&
+          Array.isArray(latestSnapshot.skills) &&
+          latestSnapshot.summary
+        ) {
+          const normalizedLatestSkills = normalizeSkills(latestSnapshot.skills)
+          setSkills(normalizedLatestSkills)
+          setSummary(latestSnapshot.summary)
+          setLastUpdatedLabel("Loaded from persisted analysis")
+          writeAnalysisSnapshot({
+            handle: sessionHandle,
+            skills: normalizedLatestSkills,
+            summary: latestSnapshot.summary,
+            updatedAt: Date.now(),
+          })
+        } else {
           void analyze(sessionHandle)
         }
       } catch {
-        if (savedHandle) {
-          void analyze(savedHandle)
-        } else {
-          setError("Link your Codeforces account to start your skill analysis.")
-        }
+        setHasLinkedHandle(false)
+        setSessionHandle("")
+        setError("Link your Codeforces account to start your skill analysis.")
       }
     }
 
@@ -297,17 +315,31 @@ export default function DashboardPage() {
       <div className="space-y-8">
         <Card className="premium-surface">
           <CardContent className="p-5">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Input
-                value={handle}
-                onChange={(event) => setHandle(event.target.value)}
-                placeholder="Enter Codeforces handle (e.g., tourist)"
-                className="h-11 rounded-xl border-white/15 bg-white/5"
-              />
-              <Button onClick={() => void analyze(handle)} disabled={loading} className="h-11 rounded-xl px-6">
-                {loading ? "Analyzing..." : "Analyze Skill Health"}
-              </Button>
-            </div>
+            {hasLinkedHandle ? (
+              <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+                <div>
+                  <p className="text-sm text-muted-foreground">Linked Codeforces handle</p>
+                  <p className="text-base font-semibold text-foreground">{sessionHandle}</p>
+                </div>
+                <Button onClick={() => void analyze()} disabled={loading} className="h-11 rounded-xl px-6">
+                  {loading ? "Analyzing..." : "Refresh Skill Health"}
+                </Button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-3">
+                <p className="text-sm text-amber-100">No linked Codeforces handle found for this session.</p>
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="rounded-xl"
+                    onClick={() => (window.location.href = "/link-codeforces")}
+                  >
+                    Link account
+                  </Button>
+                </div>
+              </div>
+            )}
             {error ? (
               <div className="mt-3 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
                 <div className="inline-flex items-center gap-2">
@@ -315,7 +347,7 @@ export default function DashboardPage() {
                   {error}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" className="rounded-xl" onClick={() => void analyze(handle)} disabled={loading || !handle.trim()}>
+                  <Button size="sm" variant="outline" className="rounded-xl" onClick={() => void analyze()} disabled={loading || !hasLinkedHandle}>
                     Retry
                   </Button>
                   <Button size="sm" variant="secondary" className="rounded-xl" onClick={() => (window.location.href = "/link-codeforces")}>

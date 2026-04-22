@@ -22,25 +22,67 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { ANALYSIS_STORAGE_KEY, SkillRisk, bucketCounts } from "@/lib/skillpulse-product"
+import { SkillRisk, bucketCounts } from "@/lib/skillpulse-product"
 import { riskChartColor } from "@/components/premium/risk-theme"
 
+type TrendRow = {
+  skill: string
+  latestArs: number
+  previousArs: number | null
+  delta: number
+  trend: "improving" | "stable" | "declining"
+}
+
+type TimelineRow = {
+  runId: number
+  createdAt: string
+  overallHealth: number
+  skillsTracked: number
+  critical: number
+  atRisk: number
+}
+
+type HistoryPayload = {
+  latestSkills: Array<{ skill: string; ars: number; risk: SkillRisk["risk"] }>
+  trends: TrendRow[]
+  timeline: TimelineRow[]
+  insight: string
+}
+
 export default function AnalyticsPage() {
-  const [skills, setSkills] = useState<SkillRisk[]>([])
+  const [history, setHistory] = useState<HistoryPayload>({
+    latestSkills: [],
+    trends: [],
+    timeline: [],
+    insight: "",
+  })
   const [activeDistribution, setActiveDistribution] = useState<string | null>(null)
   const [activeTopRisk, setActiveTopRisk] = useState<string | null>(null)
   const [activeHealthSlice, setActiveHealthSlice] = useState<string | null>(null)
 
   useEffect(() => {
-    const raw = localStorage.getItem(ANALYSIS_STORAGE_KEY)
-    if (!raw) return
-    try {
-      const parsed = JSON.parse(raw) as { skills?: SkillRisk[] }
-      if (Array.isArray(parsed.skills)) setSkills(parsed.skills)
-    } catch {
-      // Ignore malformed local snapshot
+    let mounted = true
+    async function hydrate() {
+      const response = await fetch("/api/analytics/history", { cache: "no-store" })
+      const data = await response.json().catch(() => ({}))
+      if (!mounted || !response.ok || !data?.history) return
+      setHistory(data.history as HistoryPayload)
+    }
+    void hydrate()
+    return () => {
+      mounted = false
     }
   }, [])
+
+  const skills = useMemo<SkillRisk[]>(
+    () =>
+      history.latestSkills.map((row) => ({
+        skill: row.skill,
+        ars: row.ars,
+        risk: row.risk,
+      })),
+    [history.latestSkills]
+  )
 
   const distribution = useMemo(() => bucketCounts(skills), [skills])
   const topRisk = useMemo(() => [...skills].sort((a, b) => b.ars - a.ars).slice(0, 8), [skills])
@@ -48,19 +90,12 @@ export default function AnalyticsPage() {
 
   const trendData = useMemo(
     () =>
-      [
-        { day: "Mon", score: 52 },
-        { day: "Tue", score: 55 },
-        { day: "Wed", score: 58 },
-        { day: "Thu", score: 54 },
-        { day: "Fri", score: 61 },
-        { day: "Sat", score: 63 },
-        { day: "Sun", score: 66 },
-      ].map((item) => ({
-        ...item,
-        adjusted: skills.length ? Math.min(100, Math.max(20, item.score + Math.round((skills.length - 10) / 2))) : item.score,
+      history.timeline.map((row) => ({
+        at: new Date(row.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        health: row.overallHealth,
+        critical: row.critical,
       })),
-    [skills.length]
+    [history.timeline]
   )
 
   const healthPie = useMemo(() => {
@@ -72,16 +107,25 @@ export default function AnalyticsPage() {
     ]
   }, [skills])
 
+  const trendLabelCounts = useMemo(
+    () => [
+      { name: "Improving", value: history.trends.filter((t) => t.trend === "improving").length },
+      { name: "Stable", value: history.trends.filter((t) => t.trend === "stable").length },
+      { name: "Declining", value: history.trends.filter((t) => t.trend === "declining").length },
+    ],
+    [history.trends]
+  )
+
   return (
     <DashboardShell
       title="Analytics Studio"
-      description="Multi-angle visualization for retention risk, concentration, and trend posture."
-      insight={skills.length ? `Tracking ${skills.length} skills with live risk analytics.` : "Run analysis to unlock advanced charts."}
+      description="Historical retention analytics from persisted inference runs."
+      insight={history.insight || "Run analyses over time to unlock trend intelligence."}
     >
       <div className="space-y-6">
         <SectionHeader
           title="Visual Intelligence Grid"
-          subtitle="Dive into distribution, hotspots, and trend movements from one premium analytics surface."
+          subtitle="Distribution, hotspots, and trend movement from your persisted run history."
         />
 
         <div className="grid gap-4 xl:grid-cols-2">
@@ -91,17 +135,14 @@ export default function AnalyticsPage() {
             insight={distribution.length ? `${distribution[0]?.bucket ?? "Safe"} bucket has the highest concentration.` : undefined}
           >
             {skills.length === 0 ? (
-              <EmptyState title="No data" description="Analyze a handle to populate this chart." />
+              <EmptyState title="No data" description="Run analysis to populate this chart." />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={distribution}>
                   <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
                   <YAxis allowDecimals={false} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(18,22,30,0.95)" }}
-                    formatter={(value: number, _name, payload) => [value, `${payload?.payload?.bucket} skills`]}
-                  />
-                  <Bar dataKey="count" radius={[8, 8, 0, 0]} animationDuration={480} animationBegin={80} animationEasing="ease-out">
+                  <Tooltip />
+                  <Bar dataKey="count" radius={[8, 8, 0, 0]}>
                     {distribution.map((item) => (
                       <Cell
                         key={item.bucket}
@@ -117,26 +158,13 @@ export default function AnalyticsPage() {
             )}
           </ChartShell>
 
-          <ChartShell
-            title="Overall Health"
-            subtitle="Snapshot of healthy vs risky posture."
-            insight={skills.length ? (healthPie[0].value >= 60 ? "Low-risk skills dominate your profile." : "Risk pressure currently outweighs healthy segments.") : undefined}
-          >
+          <ChartShell title="Overall Health" subtitle="Healthy vs risky posture from latest persisted run.">
             {skills.length === 0 ? (
-              <EmptyState title="No data" description="Analyze a handle to populate this chart." />
+              <EmptyState title="No data" description="Run analysis to populate this chart." />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie
-                    data={healthPie}
-                    dataKey="value"
-                    innerRadius={60}
-                    outerRadius={95}
-                    paddingAngle={2}
-                    animationDuration={560}
-                    animationBegin={110}
-                    animationEasing="ease-out"
-                  >
+                  <Pie data={healthPie} dataKey="value" innerRadius={60} outerRadius={95} paddingAngle={2}>
                     {healthPie.map((slice) => (
                       <Cell
                         key={slice.name}
@@ -147,10 +175,7 @@ export default function AnalyticsPage() {
                       />
                     ))}
                   </Pie>
-                  <Tooltip
-                    contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(18,22,30,0.95)" }}
-                    formatter={(value: number, name) => [`${value}%`, `${name} posture`]}
-                  />
+                  <Tooltip formatter={(value: number, name) => [`${value}%`, `${name} posture`]} />
                 </PieChart>
               </ResponsiveContainer>
             )}
@@ -158,21 +183,18 @@ export default function AnalyticsPage() {
 
           <ChartShell
             title="Top Risk Hotspots"
-            subtitle="Most urgent skills by ARS intensity."
+            subtitle="Most urgent skills by latest ARS intensity."
             insight={topRisk.length ? `Most risk concentrated in ${topRisk[0].skill}.` : undefined}
           >
             {topRisk.length === 0 ? (
-              <EmptyState title="No data" description="Analyze a handle to populate this chart." />
+              <EmptyState title="No data" description="Run analysis to populate this chart." />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topRisk} layout="vertical" margin={{ left: 20 }}>
                   <XAxis type="number" domain={[0, 100]} />
                   <YAxis dataKey="skill" type="category" width={130} tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(18,22,30,0.95)" }}
-                    formatter={(value: number) => [`${value.toFixed(1)} ARS`, "Current intensity"]}
-                  />
-                  <Bar dataKey="ars" radius={[0, 8, 8, 0]} animationDuration={520} animationBegin={120} animationEasing="ease-out">
+                  <Tooltip formatter={(value: number) => [`${value.toFixed(1)} ARS`, "Current intensity"]} />
+                  <Bar dataKey="ars" radius={[0, 8, 8, 0]}>
                     {topRisk.map((item) => (
                       <Cell
                         key={item.skill}
@@ -188,52 +210,44 @@ export default function AnalyticsPage() {
             )}
           </ChartShell>
 
-          <ChartShell title="Stability Radar" subtitle="Relative pressure profile across top-risk skills." insight="Longer spikes represent disproportionately fragile topics.">
-            {radarData.length === 0 ? (
-              <EmptyState title="No data" description="Analyze a handle to populate this chart." />
+          <ChartShell title="Trend Posture Radar" subtitle="Improving/stable/declining skill counts from latest delta analysis.">
+            {history.trends.length === 0 ? (
+              <EmptyState title="No data" description="At least two runs are needed for trend deltas." />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={radarData} outerRadius={90}>
+                <RadarChart data={trendLabelCounts} outerRadius={90}>
                   <PolarGrid />
-                  <PolarAngleAxis dataKey="skill" tick={{ fontSize: 10 }} />
+                  <PolarAngleAxis dataKey="name" tick={{ fontSize: 11 }} />
                   <Tooltip />
-                  <Radar dataKey="ars" stroke="#60a5fa" fill="#3b82f6" fillOpacity={0.28} />
+                  <Radar dataKey="value" stroke="#60a5fa" fill="#3b82f6" fillOpacity={0.28} />
                 </RadarChart>
               </ResponsiveContainer>
             )}
           </ChartShell>
 
           <ChartShell
-            title="Weekly Retention Trend"
-            subtitle="Synthetic progression track tuned by current tracked scope."
-            insight="Trend slope indicates whether your reinforcement cadence is improving."
+            title="Historical Health Trend"
+            subtitle="Overall health trajectory from persisted inference runs."
+            insight="This chart is generated only from stored run history."
           >
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendData}>
-                <defs>
-                  <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.55} />
-                    <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="day" tick={{ fontSize: 11 }} />
-                <YAxis domain={[0, 100]} />
-                <Tooltip
-                  contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(18,22,30,0.95)" }}
-                  formatter={(value: number) => [`${value}%`, "Retention score"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="adjusted"
-                  stroke="#22d3ee"
-                  strokeWidth={2}
-                  fill="url(#trendFill)"
-                  animationDuration={620}
-                  animationBegin={120}
-                  animationEasing="ease-out"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {trendData.length === 0 ? (
+              <EmptyState title="No data" description="Run analysis to build historical trend data." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={trendData}>
+                  <defs>
+                    <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.55} />
+                      <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="at" tick={{ fontSize: 11 }} />
+                  <YAxis domain={[0, 100]} />
+                  <Tooltip formatter={(value: number) => [`${value}%`, "Health"]} />
+                  <Area type="monotone" dataKey="health" stroke="#22d3ee" strokeWidth={2} fill="url(#trendFill)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </ChartShell>
         </div>
       </div>

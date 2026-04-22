@@ -12,9 +12,9 @@ import { ArsProgress } from "@/components/premium/ars-progress"
 import { FilterChipGroup } from "@/components/premium/filter-chip-group"
 import { EmptyState } from "@/components/premium/empty-state"
 import {
-  ANALYSIS_STORAGE_KEY,
   SkillRisk,
   buildPracticeRecommendations,
+  readAnalysisSnapshot,
 } from "@/lib/skillpulse-product"
 import { ChartShell } from "@/components/premium/chart-shell"
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
@@ -38,14 +38,9 @@ export default function SkillsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("cards")
 
   useEffect(() => {
-    const raw = localStorage.getItem(ANALYSIS_STORAGE_KEY)
-    if (!raw) return
-
-    try {
-      const parsed = JSON.parse(raw) as { skills?: SkillRisk[] }
-      if (Array.isArray(parsed.skills)) setSkills(parsed.skills)
-    } catch {
-      // Ignore malformed local snapshot
+    const snapshot = readAnalysisSnapshot()
+    if (snapshot?.skills) {
+      setSkills(snapshot.skills)
     }
   }, [])
 
