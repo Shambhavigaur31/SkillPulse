@@ -6,7 +6,7 @@ import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { Award, Lock, ChevronRight } from "lucide-react"
+import { Award, Lock, ChevronRight, Sparkles, Target } from "lucide-react"
 
 type Achievement = {
   key: string
@@ -55,6 +55,11 @@ export function Achievements() {
     () => achievements.filter((achievement) => achievement.unlocked).length,
     [achievements]
   )
+  const nextAchievement = useMemo(() => {
+    return achievements
+      .filter((achievement) => !achievement.unlocked)
+      .sort((a, b) => a.total - a.progress - (b.total - b.progress))[0]
+  }, [achievements])
   const displayAchievements = showAll ? achievements : achievements.slice(0, 6)
 
   return (
@@ -71,6 +76,30 @@ export function Achievements() {
         </div>
       </CardHeader>
       <CardContent>
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5" />
+              Progress snapshot
+            </div>
+            <p className="mt-2 text-lg font-semibold text-foreground">{unlockedCount} unlocked</p>
+            <p className="text-xs text-muted-foreground">Keep streaks and recovery sessions steady.</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Target className="h-3.5 w-3.5" />
+              Next milestone
+            </div>
+            <p className="mt-2 text-sm font-semibold text-foreground">
+              {nextAchievement ? nextAchievement.name : "All badges unlocked"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {nextAchievement
+                ? `${nextAchievement.progress}/${nextAchievement.total} toward this badge`
+                : "You cleared every achievement tier."}
+            </p>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {displayAchievements.map((achievement) => (
             <div
@@ -82,11 +111,16 @@ export function Achievements() {
                   : "border-border bg-muted/30 hover:bg-muted/50"
               )}
             >
+              {!achievement.unlocked ? (
+                <div className="absolute right-2 top-2 rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] text-muted-foreground">
+                  Locked
+                </div>
+              ) : null}
               <div
                 className={cn(
                   "flex h-14 w-14 items-center justify-center rounded-full text-2xl",
                   achievement.unlocked
-                    ? `bg-gradient-to-br ${rarityStyles[achievement.rarity]} shadow-lg`
+                    ? `bg-linear-to-br ${rarityStyles[achievement.rarity]} shadow-lg`
                     : "bg-muted"
                 )}
               >
@@ -106,10 +140,15 @@ export function Achievements() {
                   </p>
                 </div>
               ) : (
-                <Badge className={cn("mt-3 text-[10px] font-semibold capitalize border-0 text-white", `bg-gradient-to-r ${rarityStyles[achievement.rarity]}`)}>
+                <Badge className={cn("mt-3 text-[10px] font-semibold capitalize border-0 text-white", `bg-linear-to-r ${rarityStyles[achievement.rarity]}`)}>
                   {achievement.rarity}
                 </Badge>
               )}
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                {achievement.unlocked
+                  ? `Unlocked ${achievement.unlockedAt ?? "recently"}`
+                  : `Complete ${achievement.total - achievement.progress} more to unlock.`}
+              </p>
             </div>
           ))}
         </div>

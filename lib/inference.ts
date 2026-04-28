@@ -173,11 +173,16 @@ export async function predictCodeforcesUser(
 /**
  * Format results for API response
  */
+function safeNowIso(): string {
+  const now = new Date()
+  return Number.isNaN(now.getTime()) ? new Date(0).toISOString() : now.toISOString()
+}
+
 export function formatInferenceResponse(results: InferenceResult[]) {
   return {
     success: true,
     data: results,
-    timestamp: new Date().toISOString(),
+    timestamp: safeNowIso(),
     count: results.length,
   }
 }
@@ -189,7 +194,7 @@ export function formatErrorResponse(error: Error | string) {
   return {
     success: false,
     error: error instanceof Error ? error.message : String(error),
-    timestamp: new Date().toISOString(),
+    timestamp: safeNowIso(),
   }
 }
 

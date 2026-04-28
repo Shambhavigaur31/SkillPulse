@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
 import {
   AlertCircle,
@@ -11,17 +12,6 @@ import {
   Sparkles,
   Target,
 } from "lucide-react"
-import {
-  Bar,
-  BarChart,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
 import { DashboardShell } from "@/components/dashboard/dashboard-shell"
 import { DashboardFilters } from "@/components/dashboard/filters"
 import { Button } from "@/components/ui/button"
@@ -32,23 +22,25 @@ import { RiskBadge } from "@/components/premium/risk-badge"
 import { ArsProgress } from "@/components/premium/ars-progress"
 import { FilterChipGroup } from "@/components/premium/filter-chip-group"
 import { RecommendationCard } from "@/components/premium/recommendation-card"
-import { ChartShell } from "@/components/premium/chart-shell"
 import { EmptyState } from "@/components/premium/empty-state"
 import { LoadingSkeleton } from "@/components/premium/loading-skeleton"
+import { Tooltip as SkillTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useToast } from "@/hooks/use-toast"
 import { getApiErrorCode, getApiErrorMessage, toProductMessage } from "@/lib/api-client"
 import {
   SkillRisk,
+  SkillRiskInput,
   Summary,
-  bucketCounts,
   buildCourseRecommendations,
   buildPracticeRecommendations,
   buildResourceRecommendations,
+  getSkillLearningLink,
   normalizeSkills,
+  readNotifications,
+  formatRelativeTime,
   readAnalysisSnapshot,
   writeAnalysisSnapshot,
 } from "@/lib/skillpulse-product"
-import { riskChartColor } from "@/components/premium/risk-theme"
 
 function primaryInsight(summary: Summary | null): string {
   if (!summary || summary.skillsTracked === 0) return "Run an analysis to unlock your live retention command center."
@@ -79,7 +71,20 @@ function skillTrendLabel(ars: number): string {
   return "Stable retention trend"
 }
 
-export default function DashboardPage() {
+function riskExplainability(skill: SkillRisk, cascadeDelta?: number): string {
+  if (cascadeDelta && cascadeDelta > 0) {
+    return `${skill.skill} is elevated by +${cascadeDelta.toFixed(1)} cascade risk from prerequisites.`
+  }
+  if (skill.ars >= 85) return "Severe decay: extended gap between recent practice sessions."
+  if (skill.ars >= 70) return "Critical decay: practice is overdue and recall is slipping."
+  if (skill.ars >= 55) return "Moderate decay: review this week to avoid escalation."
+  if (skill.ars >= 40) return "Gentle decay: keep warm with a short refresh."
+  return "Healthy retention: light reinforcement keeps this stable."
+}
+
+function DashboardPageContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [filters, setFilters] = useState({
     timeRange: "7d",
     category: "all",
@@ -88,7 +93,7 @@ export default function DashboardPage() {
 
   const [sessionHandle, setSessionHandle] = useState("")
   const [hasLinkedHandle, setHasLinkedHandle] = useState(false)
-  const [skills, setSkills] = useState<SkillRisk[]>([])
+  const [rawSkills, setRawSkills] = useState<SkillRiskInput[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,10 +101,12 @@ export default function DashboardPage() {
   const [lastUpdatedLabel, setLastUpdatedLabel] = useState<string | null>(null)
   const [riskFilter, setRiskFilter] = useState<"ALL" | SkillRisk["risk"]>("ALL")
   const [sortMode, setSortMode] = useState<"risk" | "ars" | "alpha">("risk")
-  const [activeDistribution, setActiveDistribution] = useState<string | null>(null)
-  const [activeRiskSkill, setActiveRiskSkill] = useState<string | null>(null)
-  const [activeHealthSlice, setActiveHealthSlice] = useState<string | null>(null)
+  const [planningSkill, setPlanningSkill] = useState<string | null>(null)
+  const [mounted, setMounted] = useState(false)
+  const [activityFeed, setActivityFeed] = useState<ReturnType<typeof readNotifications>>([])
   const { toast } = useToast()
+
+  const normalizedSkills = useMemo(() => normalizeSkills(rawSkills), [rawSkills])
 
   async function analyze(currentHandle?: string) {
     const normalizedHandle = (currentHandle ?? sessionHandle).trim()
@@ -133,7 +140,7 @@ export default function DashboardPage() {
         return
       }
 
-      const nextSkills = Array.isArray(data.skills) ? normalizeSkills(data.skills) : []
+      const nextSkills = Array.isArray(data.skills) ? (data.skills as SkillRiskInput[]) : []
       const nextSummary = (data.summary ?? {
         skillsTracked: 0,
         critical: 0,
@@ -141,14 +148,14 @@ export default function DashboardPage() {
         overallHealth: 100,
       }) as Summary
 
-      setSkills(nextSkills)
+      setRawSkills(nextSkills)
       setSummary(nextSummary)
       setMessage(typeof data.message === "string" ? data.message : null)
       setLastUpdatedLabel("Last analyzed just now")
 
       writeAnalysisSnapshot({
         handle: normalizedHandle,
-        skills: nextSkills,
+        skills: normalizeSkills(nextSkills),
         summary: nextSummary,
         updatedAt: Date.now(),
       })
@@ -190,7 +197,7 @@ export default function DashboardPage() {
 
         const localSnapshot = readAnalysisSnapshot()
         if (localSnapshot && localSnapshot.handle === sessionHandle) {
-          setSkills(localSnapshot.skills)
+          setRawSkills(localSnapshot.skills)
           setSummary(localSnapshot.summary)
           setLastUpdatedLabel("Loaded from local cache")
         }
@@ -209,13 +216,12 @@ export default function DashboardPage() {
           Array.isArray(latestSnapshot.skills) &&
           latestSnapshot.summary
         ) {
-          const normalizedLatestSkills = normalizeSkills(latestSnapshot.skills)
-          setSkills(normalizedLatestSkills)
+          setRawSkills(Array.isArray(latestSnapshot.skills) ? latestSnapshot.skills : [])
           setSummary(latestSnapshot.summary)
           setLastUpdatedLabel("Loaded from persisted analysis")
           writeAnalysisSnapshot({
             handle: sessionHandle,
-            skills: normalizedLatestSkills,
+            skills: normalizeSkills(latestSnapshot.skills),
             summary: latestSnapshot.summary,
             updatedAt: Date.now(),
           })
@@ -232,8 +238,33 @@ export default function DashboardPage() {
     void hydrateFromSession()
   }, [])
 
+  useEffect(() => {
+    if (!sessionHandle) return
+    if (searchParams.get("refresh") === "1") {
+      void analyze(sessionHandle)
+    }
+  }, [searchParams, sessionHandle])
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+    setActivityFeed(readNotifications())
+  }, [mounted])
+
+  useEffect(() => {
+    if (!mounted) return
+    function handleActivityRefresh() {
+      setActivityFeed(readNotifications())
+    }
+    window.addEventListener("skillpulse:analysis-updated", handleActivityRefresh)
+    return () => window.removeEventListener("skillpulse:analysis-updated", handleActivityRefresh)
+  }, [mounted])
+
   const filteredAndSortedSkills = useMemo(() => {
-    let next = [...skills]
+    let next = [...normalizedSkills]
 
     if (riskFilter !== "ALL") {
       next = next.filter((skill) => skill.risk === riskFilter)
@@ -252,43 +283,45 @@ export default function DashboardPage() {
     }
 
     return next
-  }, [riskFilter, skills, sortMode])
+  }, [normalizedSkills, riskFilter, sortMode])
 
   const topActions = useMemo(() => {
-    return [...skills]
+    return [...normalizedSkills]
       .sort((a, b) => b.ars - a.ars)
       .slice(0, 3)
       .map((skill, idx) => ({
         rank: idx + 1,
         skill,
         duration: skill.ars >= 85 ? "18 min" : skill.ars >= 70 ? "12 min" : "8 min",
+        urgencyScore: Math.max(50, Math.min(99, Math.round(skill.ars + riskWeight(skill.risk) * 3))),
+        expectedGain: skill.ars >= 85 ? "10-14%" : skill.ars >= 70 ? "7-10%" : "4-7%",
+        practiceUrl: `/practice?skill=${encodeURIComponent(skill.skill)}&source=dashboard`,
+        resourceUrl: getSkillLearningLink(skill.skill, "resource") ?? getSkillLearningLink(skill.skill, "notes"),
         reason:
           skill.ars >= 70
             ? "High decay signal. Immediate practice gives best recovery."
             : "Moderate decay trend. Quick revision avoids escalation.",
       }))
-  }, [skills])
+  }, [normalizedSkills])
 
-  const practiceRecs = useMemo(() => buildPracticeRecommendations(skills).slice(0, 2), [skills])
-  const resourceRecs = useMemo(() => buildResourceRecommendations(skills).slice(0, 2), [skills])
-  const courseRecs = useMemo(() => buildCourseRecommendations(skills).slice(0, 2), [skills])
+  const practiceRecs = useMemo(() => buildPracticeRecommendations(normalizedSkills).slice(0, 2), [normalizedSkills])
+  const resourceRecs = useMemo(() => buildResourceRecommendations(normalizedSkills).slice(0, 2), [normalizedSkills])
+  const courseRecs = useMemo(() => buildCourseRecommendations(normalizedSkills).slice(0, 2), [normalizedSkills])
 
-  const riskDistribution = useMemo(() => bucketCounts(skills), [skills])
-  const topRiskySkills = useMemo(() => [...skills].sort((a, b) => b.ars - a.ars).slice(0, 6), [skills])
-  const overallHealthData = useMemo(
-    () => [
-      { name: "Healthy", value: Math.max(0, summary?.overallHealth ?? 0), fill: "#34d399" },
-      { name: "Risk", value: 100 - Math.max(0, summary?.overallHealth ?? 0), fill: "#ef4444" },
-    ],
-    [summary]
-  )
-
-  const heatmapSkills = useMemo(() => [...skills].sort((a, b) => b.ars - a.ars).slice(0, 12), [skills])
+  const cascadeBySkill = useMemo(() => {
+    const map = new Map<string, number>()
+    rawSkills.forEach((skill) => {
+      if (typeof skill.cascadeDelta === "number") {
+        map.set(skill.skill, skill.cascadeDelta)
+      }
+    })
+    return map
+  }, [rawSkills])
 
   const heroInsight = useMemo(() => {
     if (!summary || summary.skillsTracked === 0) return "Run an analysis to unlock your live retention command center."
 
-    const topRisk = [...skills].sort((a, b) => b.ars - a.ars)[0]
+    const topRisk = [...normalizedSkills].sort((a, b) => b.ars - a.ars)[0]
     if (topRisk && topRisk.ars >= 80) {
       return `${topRisk.skill} is at critical risk. Address it today for the strongest retention rebound.`
     }
@@ -303,7 +336,40 @@ export default function DashboardPage() {
     }
 
     return "Your skill health is stable. Keep momentum with light reinforcement."
-  }, [skills, summary])
+  }, [normalizedSkills, summary])
+
+  async function handlePlanLater(skill: SkillRisk) {
+    if (planningSkill) return
+    setPlanningSkill(skill.skill)
+    try {
+      const response = await fetch("/api/review-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          skill: skill.skill,
+          quality: 2,
+          completed: false,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Plan later failed")
+      }
+
+      toast({
+        title: "Rescheduled via scheduler",
+        description: `${skill.skill} moved to the next optimal review window.`,
+      })
+    } catch {
+      toast({
+        title: "Unable to reschedule",
+        description: "Please try again from the Practice board.",
+        variant: "destructive",
+      })
+    } finally {
+      setPlanningSkill(null)
+    }
+  }
 
   return (
     <DashboardShell
@@ -432,35 +498,41 @@ export default function DashboardPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {filteredAndSortedSkills.map((skill, index) => (
-                <motion.div
-                  key={skill.skill}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ y: -3, scale: 1.013 }}
-                  whileTap={{ scale: 0.992 }}
-                  transition={{ duration: 0.22, delay: index * 0.02, ease: "easeOut" }}
-                  className={`premium-surface premium-card-hover group p-4 ${skill.risk === "CRITICAL" || skill.risk === "SEVERE" ? "shadow-red-500/18" : skill.risk === "AT_RISK" ? "shadow-amber-500/14" : ""} ${skill.ars > 80 ? "critical-pulse" : ""}`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{skill.skill}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">ARS score: {skill.ars.toFixed(1)}</p>
-                    </div>
-                    <RiskBadge risk={skill.risk} />
-                  </div>
-                  <ArsProgress className="mt-3" value={skill.ars} risk={skill.risk} />
-                  <div className="mt-3 space-y-1 text-xs text-muted-foreground opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
-                    <p>Last used {inferDaysSinceLastPractice(skill.ars)} days ago</p>
-                    <p>{skillTrendLabel(skill.ars)}</p>
-                    <p>Appears in high-frequency interview topics</p>
-                  </div>
-                </motion.div>
+                <SkillTooltip key={skill.skill}>
+                  <TooltipTrigger asChild>
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      whileHover={{ y: -3, scale: 1.013 }}
+                      whileTap={{ scale: 0.992 }}
+                      transition={{ duration: 0.22, delay: index * 0.02, ease: "easeOut" }}
+                      className={`premium-surface premium-card-hover group p-4 ${skill.risk === "CRITICAL" || skill.risk === "SEVERE" ? "shadow-red-500/18" : skill.risk === "AT_RISK" ? "shadow-amber-500/14" : ""} ${skill.ars > 80 ? "critical-pulse" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{skill.skill}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">ARS score: {skill.ars.toFixed(1)}</p>
+                        </div>
+                        <RiskBadge risk={skill.risk} />
+                      </div>
+                      <ArsProgress className="mt-3" value={skill.ars} risk={skill.risk} />
+                      <div className="mt-3 space-y-1 text-xs text-muted-foreground opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+                        <p>Last used {inferDaysSinceLastPractice(skill.ars)} days ago</p>
+                        <p>{skillTrendLabel(skill.ars)}</p>
+                        <p>Appears in high-frequency interview topics</p>
+                      </div>
+                    </motion.div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-56">
+                    {riskExplainability(skill, cascadeBySkill.get(skill.skill))}
+                  </TooltipContent>
+                </SkillTooltip>
               ))}
             </div>
           )}
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-5">
+        <section className="grid gap-5 xl:grid-cols-5">
           <div className="space-y-4 xl:col-span-3">
             <SectionHeader
               title="What To Do Today"
@@ -499,15 +571,23 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">{item.reason}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="rounded-full border border-white/15 bg-white/5 px-2 py-1 text-muted-foreground">
+                        Urgency: <span className="text-foreground">{item.urgencyScore}/100</span>
+                      </span>
+                      <span className="rounded-full border border-emerald-300/25 bg-emerald-500/10 px-2 py-1 text-emerald-100">
+                        Expected gain: {item.expectedGain}
+                      </span>
+                      <span className="rounded-full border border-white/15 bg-white/5 px-2 py-1 text-muted-foreground">
+                        Time: <span className="text-foreground">{item.duration}</span>
+                      </span>
+                    </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         size="sm"
                         className="rounded-xl"
                         onClick={() => {
-                          toast({
-                            title: "Task added to your plan",
-                            description: "Good catch - addressing a critical skill now boosts retention.",
-                          })
+                          router.push(item.practiceUrl)
                         }}
                       >
                         Start now
@@ -516,16 +596,23 @@ export default function DashboardPage() {
                         size="sm"
                         variant="secondary"
                         className="rounded-xl"
+                        disabled={!item.resourceUrl}
                         onClick={() => {
-                          toast({
-                            title: "Nice! You're staying consistent",
-                            description: "Resource opened for a high-priority weak zone.",
-                          })
+                          if (!item.resourceUrl) return
+                          window.open(item.resourceUrl, "_blank", "noopener,noreferrer")
                         }}
                       >
                         View resource
                       </Button>
-                      <Button size="sm" variant="outline" className="rounded-xl">Plan later</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl"
+                        disabled={planningSkill === item.skill.skill}
+                        onClick={() => void handlePlanLater(item.skill)}
+                      >
+                        Plan later
+                      </Button>
                     </div>
                   </motion.div>
                 ))}
@@ -554,7 +641,7 @@ export default function DashboardPage() {
                   reason={resourceRecs[0].why}
                   typeLabel="Resource"
                   ctaLabel="Open"
-                  ctaHref={resourceRecs[0].url}
+                  ctaHref={resourceRecs[0].url ?? undefined}
                 />
               ) : null}
               {courseRecs[0] ? (
@@ -565,7 +652,7 @@ export default function DashboardPage() {
                   typeLabel="Course"
                   meta={`${courseRecs[0].platform} • ${courseRecs[0].duration} • ${courseRecs[0].level}`}
                   ctaLabel="View course"
-                  ctaHref={courseRecs[0].url}
+                  ctaHref={courseRecs[0].url ?? undefined}
                 />
               ) : null}
               {practiceRecs.length === 0 && resourceRecs.length === 0 && courseRecs.length === 0 ? (
@@ -578,160 +665,44 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="space-y-4">
-          <SectionHeader
-            title="Insight Visualizations"
-            subtitle="Expressive charting for risk buckets, hotspots, and overall retention posture."
-          />
-          <div className="grid gap-4 xl:grid-cols-2">
-            <ChartShell
-              title="Risk Bucket Distribution"
-              subtitle="How your skills are currently distributed by risk severity."
-              insight={
-                riskDistribution.length
-                  ? `${riskDistribution[0]?.bucket ?? "Safe"} bucket currently carries the strongest concentration.`
-                  : undefined
-              }
-            >
-              {skills.length === 0 ? (
-                <EmptyState title="No chart data" description="Analyze a handle to populate this visualization." />
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={riskDistribution}>
-                    <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
-                    <YAxis allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(18,22,30,0.95)" }}
-                      formatter={(value: number, _name, payload) => [value, `${payload?.payload?.bucket} skills`]}
-                      labelFormatter={(label) => `${label} risk`}
-                    />
-                    <Bar dataKey="count" radius={[8, 8, 0, 0]} animationDuration={480} animationBegin={80} animationEasing="ease-out">
-                      {riskDistribution.map((entry) => (
-                        <Cell
-                          key={entry.bucket}
-                          fill={riskChartColor(entry.bucket)}
-                          opacity={activeDistribution && activeDistribution !== entry.bucket ? 0.35 : 1}
-                          onMouseEnter={() => setActiveDistribution(entry.bucket)}
-                          onMouseLeave={() => setActiveDistribution(null)}
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </ChartShell>
-
-            <ChartShell
-              title="Top Risky Skills"
-              subtitle="Skills with highest ARS right now."
-              insight={topRiskySkills.length ? `Most risk concentrated in ${topRiskySkills[0].skill}.` : undefined}
-            >
-              {topRiskySkills.length === 0 ? (
-                <EmptyState title="No chart data" description="Analyze a handle to populate this visualization." />
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={topRiskySkills} layout="vertical" margin={{ left: 20 }}>
-                    <XAxis type="number" domain={[0, 100]} />
-                    <YAxis dataKey="skill" type="category" width={120} tick={{ fontSize: 11 }} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(18,22,30,0.95)" }}
-                      formatter={(value: number) => [`${value.toFixed(1)} ARS`, "Current intensity"]}
-                    />
-                    <Bar dataKey="ars" radius={[0, 8, 8, 0]} animationDuration={520} animationBegin={120} animationEasing="ease-out">
-                      {topRiskySkills.map((entry) => (
-                        <Cell
-                          key={entry.skill}
-                          fill={riskChartColor(entry.risk)}
-                          opacity={activeRiskSkill && activeRiskSkill !== entry.skill ? 0.35 : 1}
-                          onMouseEnter={() => setActiveRiskSkill(entry.skill)}
-                          onMouseLeave={() => setActiveRiskSkill(null)}
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </ChartShell>
-
-            <ChartShell
-              title="Overall Health Radial"
-              subtitle="Healthy vs risk posture from latest snapshot."
-              insight={summary && summary.overallHealth >= 65 ? "Low-risk skills dominate your current profile." : "Risk pressure is elevated - targeted practice recommended."}
-            >
-              {summary ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={overallHealthData}
-                      dataKey="value"
-                      innerRadius={60}
-                      outerRadius={95}
-                      paddingAngle={2}
-                      animationDuration={560}
-                      animationBegin={120}
-                      animationEasing="ease-out"
-                    >
-                      {overallHealthData.map((entry) => (
-                        <Cell
-                          key={entry.name}
-                          fill={entry.fill}
-                          opacity={activeHealthSlice && activeHealthSlice !== entry.name ? 0.38 : 1}
-                          onMouseEnter={() => setActiveHealthSlice(entry.name)}
-                          onMouseLeave={() => setActiveHealthSlice(null)}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(18,22,30,0.95)" }}
-                      formatter={(value: number, name) => [`${value}%`, `${name} posture`]}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState title="No chart data" description="Analyze a handle to populate this visualization." />
-              )}
-            </ChartShell>
-
-            <ChartShell
-              title="Risk Intensity Heatmap"
-              subtitle="Quick visual scan of pressure by skill."
-              insight={heatmapSkills.length ? "Hover cells for rapid hotspot triage by ARS intensity." : undefined}
-            >
-              {heatmapSkills.length === 0 ? (
-                <EmptyState title="No heatmap data" description="Analyze a handle to populate this visualization." />
-              ) : (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                  {heatmapSkills.map((skill) => (
-                    <div
-                      key={skill.skill}
-                      className="interactive-focus rounded-xl border border-white/10 p-2 transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.01]"
-                      style={{ backgroundColor: `${riskChartColor(skill.risk)}22` }}
-                    >
-                      <p className="truncate text-xs font-medium text-foreground">{skill.skill}</p>
-                      <p className="mt-1 text-[11px] text-muted-foreground">ARS {skill.ars.toFixed(1)}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ChartShell>
-          </div>
-        </section>
-
         <Card className="premium-surface overflow-hidden">
           <CardContent className="p-5">
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-4">
               <div className="rounded-xl border border-primary/30 bg-primary/10 p-2 text-primary">
                 <Sparkles className="h-4 w-4" />
               </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Motivation Pulse</p>
-                <p className="text-xs text-muted-foreground">
-                  Great products compound consistency. Even a 12-minute targeted practice session can reverse tomorrow&apos;s decay trend.
-                </p>
-              </div>
-              <div className="ml-auto hidden items-center gap-1 text-muted-foreground md:inline-flex">
-                <BarChart3 className="h-4 w-4" />
-                <span className="text-xs">Trend panel coming soon</span>
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-foreground">Motivation Pulse</p>
+                  <span className="hidden items-center gap-1 text-[11px] text-muted-foreground md:inline-flex">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Live activity feed
+                  </span>
+                </div>
+                {!mounted ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Activity feed will appear after dashboard data loads.
+                  </p>
+                ) : activityFeed.length === 0 ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    No recent activity yet.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {activityFeed.slice(0, 4).map((item) => (
+                      <div key={item.id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs">
+                        <div>
+                          <p className="text-foreground">{item.skill}</p>
+                          <p className="text-[11px] text-muted-foreground">{item.message}</p>
+                        </div>
+                        <div className="text-right">
+                          <RiskBadge risk={item.risk} />
+                          <p className="mt-1 text-[11px] text-muted-foreground">{formatRelativeTime(item.createdAt)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </CardContent>
@@ -740,3 +711,12 @@ export default function DashboardPage() {
     </DashboardShell>
   )
 }
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading dashboard...</div>}>
+      <DashboardPageContent />
+    </Suspense>
+  )
+}
+

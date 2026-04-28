@@ -108,12 +108,34 @@ export default function AnalyticsPage() {
   }, [skills])
 
   const trendLabelCounts = useMemo(
-    () => [
-      { name: "Improving", value: history.trends.filter((t) => t.trend === "improving").length },
-      { name: "Stable", value: history.trends.filter((t) => t.trend === "stable").length },
-      { name: "Declining", value: history.trends.filter((t) => t.trend === "declining").length },
-    ],
-    [history.trends]
+    () => {
+      // Trend posture is only valid when we have at least two persisted snapshots.
+      if (history.timeline.length < 2) return []
+
+      const trendRows = history.trends.filter(
+        (row) =>
+          typeof row.latestArs === "number" &&
+          typeof row.previousArs === "number"
+      )
+
+      let improving = 0
+      let stable = 0
+      let declining = 0
+
+      for (const row of trendRows) {
+        const delta = row.latestArs - row.previousArs
+        if (delta < -3) improving += 1
+        else if (delta > 3) declining += 1
+        else stable += 1
+      }
+
+      return [
+        { name: "Improving", value: improving },
+        { name: "Stable", value: stable },
+        { name: "Declining", value: declining },
+      ]
+    },
+    [history.timeline.length, history.trends]
   )
 
   return (
@@ -210,9 +232,17 @@ export default function AnalyticsPage() {
             )}
           </ChartShell>
 
-          <ChartShell title="Trend Posture Radar" subtitle="Improving/stable/declining skill counts from latest delta analysis.">
-            {history.trends.length === 0 ? (
-              <EmptyState title="No data" description="At least two runs are needed for trend deltas." />
+          <ChartShell title="Trend Posture Radar" subtitle="Improving/stable/declining counts computed from real persisted ARS deltas.">
+            {history.timeline.length < 2 ? (
+              <EmptyState
+                title="Insufficient history"
+                description="Trend posture will appear after at least two saved analyses."
+              />
+            ) : trendLabelCounts.length === 0 ? (
+              <EmptyState
+                title="No comparable trends"
+                description="No skill deltas could be computed from persisted history yet."
+              />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={trendLabelCounts} outerRadius={90}>

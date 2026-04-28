@@ -84,6 +84,17 @@ function parseSummary(value: InferenceSummaryOutput | string): InferenceSummaryO
   }
 }
 
+function safeDateIso(date: Date, fallback = new Date()): string {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return fallback.toISOString()
+  }
+  return date.toISOString()
+}
+
+function safeDateOnlyIso(date: Date, fallback = new Date()): string {
+  return safeDateIso(date, fallback).slice(0, 10)
+}
+
 export async function upsertUser(input: UpsertUserInput): Promise<number> {
   await ensureSchema()
 
@@ -717,7 +728,7 @@ export async function addGamificationEvent(params: {
   `
 
   const today = new Date()
-  const todayIso = today.toISOString().slice(0, 10)
+  const todayIso = safeDateOnlyIso(today)
   const advancesStreak =
     params.xpDelta > 0 ||
     ["analysis_run", "task_review_completed", "daily_plan_completed"].includes(
@@ -867,7 +878,7 @@ export async function syncAchievements(userId: number): Promise<AchievementView[
         ${userId},
         ${rule.key},
         ${progress},
-        ${unlocked ? sql`now()` : null}
+        case when ${unlocked ? 1 : 0} = 1 then CURRENT_TIMESTAMP else null end
       )
       on conflict (user_id, achievement_key)
       do update set
@@ -1424,7 +1435,7 @@ export async function generateDailyTasks(
   const snapshot = await getLatestInferenceSnapshot(userId, handle)
   if (!snapshot) return []
 
-  const taskDate = forDate.toISOString().slice(0, 10)
+  const taskDate = safeDateOnlyIso(forDate)
   const schedulerState = await getSchedulerStateForSkills(
     userId,
     snapshot.skills.map((s) => s.skill)
@@ -1577,7 +1588,7 @@ export async function submitReviewFeedback(params: {
 
   const nextReviewDate = new Date()
   nextReviewDate.setDate(nextReviewDate.getDate() + next.intervalDays)
-  const nextReviewDateIso = nextReviewDate.toISOString().slice(0, 10)
+  const nextReviewDateIso = safeDateOnlyIso(nextReviewDate)
 
   await sql`
     update user_skill_scheduler

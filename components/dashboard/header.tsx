@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "framer-motion"
-import { Bell, Search, Sparkles, Flame, Zap } from "lucide-react"
+import { Bell, Search, Sparkles, Flame, Zap, LayoutGrid, Target, BookOpen, Network } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { useToast } from "@/hooks/use-toast"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +24,14 @@ import {
 import { getRiskTheme } from "@/components/premium/risk-theme"
 import { RiskBadge } from "@/components/premium/risk-badge"
 import { AnimatedNumber } from "@/components/premium/animated-number"
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 
 interface HeaderProps {
   userName: string
@@ -35,9 +44,14 @@ interface HeaderProps {
 export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps) {
   const router = useRouter()
   const progress = (totalXP % 1000) / 10
+  const ringProgress = Math.max(0, Math.min(100, progress))
+  const ringRadius = 18
+  const ringCircumference = 2 * Math.PI * ringRadius
   const [notifications, setNotifications] = useState<SkillNotification[]>([])
   const [hiddenNotificationIds, setHiddenNotificationIds] = useState<Set<string>>(new Set())
   const [isMarkingAll, setIsMarkingAll] = useState(false)
+  const [commandOpen, setCommandOpen] = useState(false)
+  const { toast } = useToast()
 
   useEffect(() => {
     let mounted = true
@@ -72,16 +86,21 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
   )
 
   async function handleMarkRead(notificationId: string) {
-    await fetch("/api/notifications/read", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: notificationId }),
-    })
-    setNotifications((prev) =>
-      prev.map((notification) =>
-        notification.id === notificationId ? { ...notification, read: true } : notification
+    try {
+      await fetch("/api/notifications/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: notificationId }),
+      })
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification.id === notificationId ? { ...notification, read: true } : notification
+        )
       )
-    )
+      toast({ title: "Marked as read", description: "Notification updated." })
+    } catch {
+      toast({ title: "Unable to mark read", description: "Please try again.", variant: "destructive" })
+    }
   }
 
   async function handleMarkAllRead() {
@@ -102,18 +121,41 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
     })
 
     window.setTimeout(async () => {
-      await fetch("/api/notifications/read-all", { method: "POST" })
-      setNotifications((prev) => prev.map((notification) => ({ ...notification, read: true })))
-      setHiddenNotificationIds(new Set())
-      setIsMarkingAll(false)
+      try {
+        await fetch("/api/notifications/read-all", { method: "POST" })
+        setNotifications((prev) => prev.map((notification) => ({ ...notification, read: true })))
+        toast({ title: "All read", description: "Notifications cleared." })
+      } catch {
+        toast({ title: "Unable to mark all", description: "Please try again.", variant: "destructive" })
+      } finally {
+        setHiddenNotificationIds(new Set())
+        setIsMarkingAll(false)
+      }
     }, unread.length * 65 + 220)
   }
 
   async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" })
-    router.push("/login")
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" })
+    router.replace("/login")
     router.refresh()
   }
+
+  function runCommand(action: () => void) {
+    setCommandOpen(false)
+    action()
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const isCmdK = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k"
+      if (isCmdK) {
+        event.preventDefault()
+        setCommandOpen((prev) => !prev)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
   
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b border-border bg-card/95 backdrop-blur-sm px-6 py-3">
@@ -130,11 +172,13 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
         
         <div className="ml-8 hidden items-center gap-2 rounded-xl bg-secondary/50 border border-border px-4 py-2.5 lg:flex transition-all focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/50">
           <Search className="h-4 w-4 text-muted-foreground" />
-          <input 
-            type="text" 
-            placeholder="Search skills, topics, courses..." 
-            className="w-72 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-          />
+          <button
+            type="button"
+            onClick={() => setCommandOpen(true)}
+            className="w-72 text-left text-sm text-muted-foreground"
+          >
+            Search skills, topics, courses...
+          </button>
           <kbd className="hidden xl:inline-flex h-5 items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
             <span className="text-xs">⌘</span>K
           </kbd>
@@ -184,7 +228,7 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-96 rounded-2xl border border-white/10 bg-background/95 p-1 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+            className="w-105 rounded-2xl border border-white/10 bg-background/95 p-2 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-1 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
           >
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
@@ -208,34 +252,50 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -6 }}
                       transition={{ duration: 0.2, ease: "easeOut", delay: index * 0.02 }}
-                      className={`mx-1 my-1 rounded-xl border border-white/10 p-3 transition-all duration-200 hover:-translate-y-0.5 ${n.read ? "bg-white/4" : "bg-white/8"}`}
+                      className={`mx-1 my-1 rounded-xl border border-white/10 p-4 transition-all duration-200 hover:-translate-y-0.5 ${n.read ? "bg-white/4" : "bg-white/8"}`}
                       style={{ borderLeftWidth: 3, borderLeftColor: theme.chartColor }}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-2.5 w-2.5 rounded-full ${theme.badgeClass.split(" ")[0]}`} />
-                          <p className="text-sm font-medium text-foreground">{n.skill} needs attention</p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-2">
+                          <span className={`mt-1 h-2.5 w-2.5 rounded-full ${theme.badgeClass.split(" ")[0]}`} />
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">{n.skill} needs attention</p>
+                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground line-clamp-2">
+                              {n.message}
+                            </p>
+                          </div>
                         </div>
                         <RiskBadge risk={n.risk} />
                       </div>
-                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{n.message}</p>
-                      <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>{n.cadence}</span>
-                        <div className="flex items-center gap-3">
-                          {!n.read ? (
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                handleMarkRead(n.id)
-                              }}
-                              className="interactive-focus text-[10px] font-medium text-primary"
-                            >
-                              Mark read
-                            </button>
-                          ) : null}
-                          <span>{formatRelativeTime(n.createdAt)}</span>
-                        </div>
+                      <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>{formatRelativeTime(n.createdAt)}</span>
+                        <span className="text-[10px]">{n.cadence}</span>
+                      </div>
+                      <div className="mt-3 flex items-center gap-2">
+                        {!n.read ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 rounded-lg px-2 text-[11px]"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleMarkRead(n.id)
+                            }}
+                          >
+                            Mark read
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 rounded-lg px-2 text-[11px]"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            router.push(`/practice?skill=${encodeURIComponent(n.skill)}&source=notifications`)
+                          }}
+                        >
+                          Open skill
+                        </Button>
                       </div>
                     </motion.div>
                   </DropdownMenuItem>
@@ -249,6 +309,27 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-3 px-2 hover:bg-secondary">
               <div className="relative">
+                <svg className="absolute -inset-1" width={50} height={50}>
+                  <circle
+                    cx={25}
+                    cy={25}
+                    r={ringRadius}
+                    stroke="rgba(148,163,184,0.25)"
+                    strokeWidth={3}
+                    fill="transparent"
+                  />
+                  <circle
+                    cx={25}
+                    cy={25}
+                    r={ringRadius}
+                    stroke="var(--primary)"
+                    strokeWidth={3}
+                    fill="transparent"
+                    strokeDasharray={ringCircumference}
+                    strokeDashoffset={ringCircumference - (ringProgress / 100) * ringCircumference}
+                    strokeLinecap="round"
+                  />
+                </svg>
                 <Avatar className="h-9 w-9 border-2 border-primary/30">
                   <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${userName}`} />
                   <AvatarFallback>{userName.slice(0, 2).toUpperCase()}</AvatarFallback>
@@ -274,14 +355,48 @@ export function Header({ userName, userLevel, xp, streak, totalXP }: HeaderProps
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profile</DropdownMenuItem>
-            <DropdownMenuItem>Settings</DropdownMenuItem>
-            <DropdownMenuItem>Learning History</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/profile")}>Profile</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/settings")}>Settings</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={handleLogout}>Log out</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
+        <CommandInput placeholder="Search actions, skills, or pages..." />
+        <CommandList>
+          <CommandEmpty>No results found.</CommandEmpty>
+          <CommandGroup heading="Navigate">
+            <CommandItem onSelect={() => runCommand(() => router.push("/"))}> 
+              <LayoutGrid className="h-4 w-4" />
+              Dashboard
+            </CommandItem>
+            <CommandItem onSelect={() => runCommand(() => router.push("/practice"))}> 
+              <Target className="h-4 w-4" />
+              Practice board
+            </CommandItem>
+            <CommandItem onSelect={() => runCommand(() => router.push("/courses"))}> 
+              <BookOpen className="h-4 w-4" />
+              Learning hub
+            </CommandItem>
+            <CommandItem onSelect={() => runCommand(() => router.push("/skill-graph"))}> 
+              <Network className="h-4 w-4" />
+              Skill graph
+            </CommandItem>
+          </CommandGroup>
+          <CommandGroup heading="Actions">
+            <CommandItem onSelect={() => runCommand(() => router.push("/practice?session=priority"))}> 
+              <Target className="h-4 w-4" />
+              Start priority session
+            </CommandItem>
+            <CommandItem onSelect={() => runCommand(() => router.push("/?refresh=1"))}> 
+              <Sparkles className="h-4 w-4" />
+              Refresh skill health
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </CommandDialog>
     </header>
   )
 }

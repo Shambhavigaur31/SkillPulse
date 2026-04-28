@@ -1,3 +1,5 @@
+import { resolveSkillResourceUrl } from "@/lib/resource-catalog"
+
 export type RiskLabel = "SAFE" | "GENTLE" | "AT_RISK" | "CRITICAL" | "SEVERE"
 
 export type SkillRisk = {
@@ -45,7 +47,8 @@ export type ResourceRecommendation = {
   risk: RiskLabel
   title: string
   type: "article" | "sheet" | "video" | "playlist" | "notes"
-  url: string
+  url: string | null
+  source: string
   difficulty: "Beginner" | "Intermediate" | "Advanced"
   why: string
 }
@@ -56,10 +59,11 @@ export type CourseRecommendation = {
   risk: RiskLabel
   title: string
   platform: string
+  source: string
   duration: string
   level: "Beginner" | "Intermediate" | "Advanced"
   reason: string
-  url: string
+  url: string | null
 }
 
 export type SkillNotification = {
@@ -181,20 +185,55 @@ const RESOURCE_MAP: Record<string, Omit<ResourceRecommendation, "skill" | "ars" 
     title: "Dynamic Programming Quick Patterns",
     type: "sheet",
     url: "https://cp-algorithms.com/dynamic_programming/intro-to-dp.html",
+    source: "CP Algorithms",
     difficulty: "Intermediate",
     why: "Covers transition patterns to reduce solve-time hesitation.",
+  },
+  "dynamic programming": {
+    title: "Dynamic Programming Practice Set",
+    type: "playlist",
+    url: "https://codeforces.com/problemset?tags=dp",
+    source: "Codeforces",
+    difficulty: "Intermediate",
+    why: "Targeted DP problem set to rebuild recall speed.",
   },
   graphs: {
     title: "BFS/DFS Visual Guide",
     type: "video",
     url: "https://www.youtube.com/watch?v=pcKY4hjDrxk",
+    source: "YouTube",
     difficulty: "Beginner",
     why: "Refresh traversal fundamentals before moving to harder graph problems.",
+  },
+  "data structures": {
+    title: "Data Structures Roadmap",
+    type: "notes",
+    url: "https://cp-algorithms.com/data_structures/",
+    source: "CP Algorithms",
+    difficulty: "Beginner",
+    why: "Rebuild core data structure intuition with structured notes.",
+  },
+  "number theory": {
+    title: "Number Theory Essentials",
+    type: "article",
+    url: "https://cp-algorithms.com/algebra/",
+    source: "CP Algorithms",
+    difficulty: "Intermediate",
+    why: "Refresh prime, modular arithmetic, and gcd fundamentals.",
+  },
+  implementation: {
+    title: "Implementation Practice Set",
+    type: "sheet",
+    url: "https://codeforces.com/problemset?tags=implementation",
+    source: "Codeforces",
+    difficulty: "Beginner",
+    why: "Sharpen implementation accuracy with targeted problems.",
   },
   strings: {
     title: "String Algorithms Basics",
     type: "article",
     url: "https://cp-algorithms.com/string/string-hashing.html",
+    source: "CP Algorithms",
     difficulty: "Intermediate",
     why: "Reinforces common string techniques used in contests.",
   },
@@ -202,15 +241,57 @@ const RESOURCE_MAP: Record<string, Omit<ResourceRecommendation, "skill" | "ars" 
     title: "Greedy Strategy Checklist",
     type: "notes",
     url: "https://codeforces.com/blog/entry/111217",
+    source: "Codeforces",
     difficulty: "Intermediate",
     why: "Helps identify when local choice proofs apply.",
+  },
+  math: {
+    title: "Math and Number Theory Practice",
+    type: "sheet",
+    url: "https://codeforces.com/problemset?tags=math",
+    source: "Codeforces",
+    difficulty: "Beginner",
+    why: "Keep math fundamentals warm with routine practice.",
+  },
+  bitmasks: {
+    title: "Bitmask DP Guide",
+    type: "article",
+    url: "https://cp-algorithms.com/algebra/bitmasks.html",
+    source: "CP Algorithms",
+    difficulty: "Intermediate",
+    why: "Clarifies bitmask representations and subset transitions.",
   },
   "binary search": {
     title: "Binary Search Problem Set",
     type: "playlist",
     url: "https://www.youtube.com/watch?v=3j0SWDX4AtU",
+    source: "YouTube",
     difficulty: "Beginner",
     why: "Strengthens boundary handling and invariant thinking.",
+  },
+  sorting: {
+    title: "Sorting & Order Statistics",
+    type: "sheet",
+    url: "https://leetcode.com/tag/sorting/",
+    source: "LeetCode",
+    difficulty: "Beginner",
+    why: "Practice sorting patterns and stable ordering logic.",
+  },
+  sortings: {
+    title: "Sorting & Order Statistics",
+    type: "sheet",
+    url: "https://leetcode.com/tag/sorting/",
+    source: "LeetCode",
+    difficulty: "Beginner",
+    why: "Practice sorting patterns and stable ordering logic.",
+  },
+  "two pointers": {
+    title: "Two Pointer Practice",
+    type: "sheet",
+    url: "https://leetcode.com/tag/two-pointers/",
+    source: "LeetCode",
+    difficulty: "Beginner",
+    why: "Strengthen sliding window and two pointer intuition.",
   },
 }
 
@@ -218,26 +299,92 @@ const COURSE_MAP: Record<string, Omit<CourseRecommendation, "skill" | "ars" | "r
   dp: {
     title: "Dynamic Programming Masterclass",
     platform: "NPTEL",
+    source: "NPTEL",
     duration: "8 weeks",
     level: "Intermediate",
     reason: "Useful when repeated DP decay suggests weak long-term retention.",
     url: "https://nptel.ac.in/courses/106106131",
   },
+  "dynamic programming": {
+    title: "Dynamic Programming Masterclass",
+    platform: "NPTEL",
+    source: "NPTEL",
+    duration: "8 weeks",
+    level: "Intermediate",
+    reason: "Structured DP course to rebuild long-term retention.",
+    url: "https://nptel.ac.in/courses/106106131",
+  },
   graphs: {
     title: "Graph Algorithms",
     platform: "Coursera",
+    source: "Coursera",
     duration: "6 weeks",
     level: "Intermediate",
     reason: "Builds stronger graph fundamentals for recurring risk zones.",
     url: "https://www.coursera.org/learn/algorithms-graphs-data-structures",
   },
+  "data structures": {
+    title: "Data Structures in Practice",
+    platform: "GeeksForGeeks",
+    source: "GeeksForGeeks",
+    duration: "Self-paced",
+    level: "Beginner",
+    reason: "Refresh DS fundamentals with structured practice modules.",
+    url: "https://www.geeksforgeeks.org/data-structures/",
+  },
+  "number theory": {
+    title: "Number Theory Fundamentals",
+    platform: "CP Algorithms",
+    source: "CP Algorithms",
+    duration: "Self-paced",
+    level: "Intermediate",
+    reason: "Core number theory series with proofs and practice links.",
+    url: "https://cp-algorithms.com/algebra/",
+  },
   strings: {
     title: "String Algorithms Essentials",
     platform: "YouTube",
+    source: "YouTube",
     duration: "4 hours",
     level: "Intermediate",
     reason: "Short focused revision to recover consistency quickly.",
     url: "https://www.youtube.com/results?search_query=string+algorithms+cp",
+  },
+  greedy: {
+    title: "Greedy Algorithms Bootcamp",
+    platform: "YouTube",
+    source: "YouTube",
+    duration: "3 hours",
+    level: "Intermediate",
+    reason: "Rebuild greedy intuition with proof walkthroughs.",
+    url: "https://www.youtube.com/results?search_query=greedy+algorithms+competitive+programming",
+  },
+  math: {
+    title: "Competitive Math Toolkit",
+    platform: "GeeksForGeeks",
+    source: "GeeksForGeeks",
+    duration: "Self-paced",
+    level: "Beginner",
+    reason: "Strengthen math foundations for frequency-based interview topics.",
+    url: "https://www.geeksforgeeks.org/mathematical-algorithms/",
+  },
+  bitmasks: {
+    title: "Bitmasking and Subsets",
+    platform: "CP Algorithms",
+    source: "CP Algorithms",
+    duration: "Self-paced",
+    level: "Intermediate",
+    reason: "Hands-on bitmask DP and subset enumeration lessons.",
+    url: "https://cp-algorithms.com/algebra/bitmasks.html",
+  },
+  sorting: {
+    title: "Sorting & Binary Search Patterns",
+    platform: "LeetCode",
+    source: "LeetCode",
+    duration: "Self-paced",
+    level: "Beginner",
+    reason: "Practice sorting/binary search workflows in one path.",
+    url: "https://leetcode.com/explore/learn/card/sorting/",
   },
 }
 
@@ -286,10 +433,13 @@ export function buildResourceRecommendations(skills: SkillRisk[]): ResourceRecom
   const risky = normalizeSkills(skills).filter((s) => s.ars >= 40)
   return risky.slice(0, 3).map((s) => {
     const key = deterministicSkillKey(s.skill)
+    const resolvedResourceUrl = resolveSkillResourceUrl(s.skill, "resource")
+    const resolvedNotesUrl = resolveSkillResourceUrl(s.skill, "notes")
     const mapped = RESOURCE_MAP[key] ?? {
       title: `${s.skill} Revision Notes`,
       type: "notes" as const,
-      url: "https://codeforces.com/problemset",
+      url: resolvedNotesUrl ?? resolvedResourceUrl ?? null,
+      source: "SkillPulse",
       difficulty: "Beginner" as const,
       why: "Targeted short revision for current weak area.",
     }
@@ -298,27 +448,38 @@ export function buildResourceRecommendations(skills: SkillRisk[]): ResourceRecom
       ars: s.ars,
       risk: s.risk,
       ...mapped,
+      url: mapped.url ?? resolvedResourceUrl ?? resolvedNotesUrl ?? null,
     }
   })
+}
+
+export function getSkillLearningLink(
+  skill: string,
+  intent: "practice" | "course" | "resource" | "notes"
+): string | null {
+  return resolveSkillResourceUrl(skill, intent)
 }
 
 export function buildCourseRecommendations(skills: SkillRisk[]): CourseRecommendation[] {
   const eligible = normalizeSkills(skills).filter((s) => s.ars >= 55)
   return eligible.slice(0, 3).map((s) => {
     const key = deterministicSkillKey(s.skill)
+    const resolvedCourseUrl = resolveSkillResourceUrl(s.skill, "course")
     const mapped = COURSE_MAP[key] ?? {
       title: `${s.skill} Foundations Course`,
       platform: "Curated",
+      source: "SkillPulse",
       duration: "Self-paced",
       level: "Intermediate" as const,
       reason: "Recommended to stabilize this skill over the next 2-3 weeks.",
-      url: "https://codeforces.com/problemset",
+      url: resolvedCourseUrl,
     }
     return {
       skill: s.skill,
       ars: s.ars,
       risk: s.risk,
       ...mapped,
+      url: mapped.url ?? resolvedCourseUrl ?? null,
     }
   })
 }

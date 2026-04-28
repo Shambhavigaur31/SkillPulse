@@ -46,15 +46,21 @@ export function RecommendationCard({
           {reason}
         </p>
         {meta ? <p className="mt-2 text-[11px] text-muted-foreground/90">{meta}</p> : null}
-        {ctaLabel && ctaHref ? (
-          <Button asChild size="sm" variant="secondary" className="mt-4 rounded-xl">
-            <a href={ctaHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5">
+        {ctaLabel ? (
+          ctaHref ? (
+            <Button asChild size="sm" variant="secondary" className="mt-4 rounded-xl">
+              <a href={ctaHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5">
+                {ctaLabel}
+                <motion.span whileHover={{ x: 2, y: -1 }} transition={{ duration: 0.16 }}>
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </motion.span>
+              </a>
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" className="mt-4 rounded-xl" disabled>
               {ctaLabel}
-              <motion.span whileHover={{ x: 2, y: -1 }} transition={{ duration: 0.16 }}>
-                <ArrowUpRight className="h-3.5 w-3.5" />
-              </motion.span>
-            </a>
-          </Button>
+            </Button>
+          )
         ) : null}
       </div>
     </motion.div>

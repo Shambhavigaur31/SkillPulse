@@ -5,6 +5,7 @@ import { DashboardShell } from "@/components/dashboard/dashboard-shell"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { useToast } from "@/hooks/use-toast"
 
 type ChannelPrefs = {
   emailEnabled: boolean
@@ -26,14 +27,24 @@ export default function SettingsPage() {
   const [prefs, setPrefs] = useState<ChannelPrefs>(defaultPrefs)
   const [saving, setSaving] = useState(false)
   const [deliveryResult, setDeliveryResult] = useState<string>("")
+  const [processingQueue, setProcessingQueue] = useState(false)
+  const { toast } = useToast()
 
   useEffect(() => {
     let mounted = true
     async function loadPrefs() {
-      const response = await fetch("/api/notifications/channels", { cache: "no-store" })
-      const data = await response.json().catch(() => ({}))
-      if (!mounted || !response.ok || !data?.prefs) return
-      setPrefs(data.prefs as ChannelPrefs)
+      try {
+        const response = await fetch("/api/notifications/channels", { cache: "no-store" })
+        const data = await response.json().catch(() => ({}))
+        if (!mounted || !response.ok || !data?.prefs) return
+        setPrefs(data.prefs as ChannelPrefs)
+      } catch {
+        toast({
+          title: "Unable to load preferences",
+          description: "Please refresh the page and try again.",
+          variant: "destructive",
+        })
+      }
     }
     void loadPrefs()
     return () => {
@@ -42,13 +53,25 @@ export default function SettingsPage() {
   }, [])
 
   async function savePrefs(next: ChannelPrefs) {
+    const previous = prefs
     setSaving(true)
     setPrefs(next)
     try {
-      await fetch("/api/notifications/channels", {
+      const response = await fetch("/api/notifications/channels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(next),
+      })
+      if (!response.ok) {
+        setPrefs(previous)
+        throw new Error("Failed to save")
+      }
+      toast({ title: "Preferences saved", description: "Notification settings updated." })
+    } catch {
+      toast({
+        title: "Unable to save",
+        description: "Please try again.",
+        variant: "destructive",
       })
     } finally {
       setSaving(false)
@@ -56,12 +79,31 @@ export default function SettingsPage() {
   }
 
   async function runDeliveryQueue() {
-    const response = await fetch("/api/notifications/deliver", { method: "POST" })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok) return
-    const result = data?.result
-    if (result) {
-      setDeliveryResult(`Processed ${result.processed}, sent ${result.sent}, skipped ${result.failed}`)
+    if (processingQueue) return
+    setProcessingQueue(true)
+    setDeliveryResult("")
+    try {
+      const response = await fetch("/api/notifications/deliver", { method: "POST" })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error("Delivery failed")
+      }
+      const result = data?.result
+      if (result) {
+        setDeliveryResult(`Processed ${result.processed}, sent ${result.sent}, failed ${result.failed}`)
+        toast({
+          title: "Delivery processed",
+          description: `Processed ${result.processed}, sent ${result.sent}, failed ${result.failed}.`,
+        })
+      }
+    } catch {
+      toast({
+        title: "Unable to process queue",
+        description: "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setProcessingQueue(false)
     }
   }
 
@@ -83,7 +125,15 @@ export default function SettingsPage() {
               ] as const
             ).map(([label, key]) => (
               <div key={key} className="flex items-center justify-between rounded-lg border border-white/10 p-3">
-                <p className="text-sm text-foreground">{label}</p>
+                <div>
+                  <p className="text-sm text-foreground">{label}</p>
+                  {key === "emailEnabled" ? (
+                    <p className="text-xs text-muted-foreground">Email delivery queued (requires SMTP setup).</p>
+                  ) : null}
+                  {key === "pushEnabled" ? (
+                    <p className="text-xs text-muted-foreground">Push delivery scaffold enabled.</p>
+                  ) : null}
+                </div>
                 <Switch
                   checked={prefs[key]}
                   disabled={saving}
@@ -102,8 +152,8 @@ export default function SettingsPage() {
             <CardTitle className="text-base">Delivery Processing</CardTitle>
           </CardHeader>
           <CardContent>
-            <Button onClick={() => void runDeliveryQueue()} className="rounded-xl">
-              Process queued notifications
+            <Button onClick={() => void runDeliveryQueue()} className="rounded-xl" disabled={processingQueue}>
+              {processingQueue ? "Processing..." : "Process queued notifications"}
             </Button>
             {deliveryResult ? <p className="mt-2 text-xs text-muted-foreground">{deliveryResult}</p> : null}
           </CardContent>

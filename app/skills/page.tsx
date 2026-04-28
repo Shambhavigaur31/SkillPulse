@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { ArrowUpDown, LayoutGrid, List, Search } from "lucide-react"
 import { DashboardShell } from "@/components/dashboard/dashboard-shell"
@@ -11,9 +12,11 @@ import { RiskBadge } from "@/components/premium/risk-badge"
 import { ArsProgress } from "@/components/premium/ars-progress"
 import { FilterChipGroup } from "@/components/premium/filter-chip-group"
 import { EmptyState } from "@/components/premium/empty-state"
+import { Tooltip as SkillTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   SkillRisk,
   buildPracticeRecommendations,
+  getSkillLearningLink,
   readAnalysisSnapshot,
 } from "@/lib/skillpulse-product"
 import { ChartShell } from "@/components/premium/chart-shell"
@@ -31,6 +34,7 @@ function riskWeight(risk: SkillRisk["risk"]): number {
 }
 
 export default function SkillsPage() {
+  const router = useRouter()
   const [skills, setSkills] = useState<SkillRisk[]>([])
   const [search, setSearch] = useState("")
   const [sortBy, setSortBy] = useState<"risk" | "ars" | "alpha">("risk")
@@ -48,6 +52,26 @@ export default function SkillsPage() {
     const recs = buildPracticeRecommendations(skills)
     return new Map(recs.map((rec) => [rec.skill, rec]))
   }, [skills])
+
+  function openPractice(skill: string) {
+    router.push(`/practice?skill=${encodeURIComponent(skill)}&source=skills`)
+  }
+
+  function openResource(skill: string) {
+    const resourceUrl = getSkillLearningLink(skill, "resource") ?? getSkillLearningLink(skill, "notes")
+    if (resourceUrl) {
+      window.open(resourceUrl, "_blank", "noopener,noreferrer")
+      return
+    }
+  }
+
+  function riskExplainability(skill: SkillRisk): string {
+    if (skill.ars >= 85) return "Severe decay: recall is slipping fast, practice today."
+    if (skill.ars >= 70) return "Critical decay: overdue for reinforcement to avoid cascade."
+    if (skill.ars >= 55) return "Moderate decay: reinforce this week to stay stable."
+    if (skill.ars >= 40) return "Gentle decay: short warm-up keeps retention high."
+    return "Healthy retention: maintain with light practice."
+  }
 
   const filtered = useMemo(() => {
     let next = [...skills]
@@ -173,29 +197,45 @@ export default function SkillsPage() {
             {filtered.map((skill, index) => {
               const recommendation = recommendationMap.get(skill.skill)
               return (
-                <motion.div
-                  key={skill.skill}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.22, delay: index * 0.02 }}
-                  className="premium-surface premium-card-hover p-4"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{skill.skill}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">ARS {skill.ars.toFixed(1)}</p>
-                    </div>
-                    <RiskBadge risk={skill.risk} />
-                  </div>
-                  <ArsProgress className="mt-3" value={skill.ars} risk={skill.risk} />
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {recommendation?.reason ?? "No urgent recommendation for this skill."}
-                  </p>
-                  <div className="mt-3 flex gap-2">
-                    <Button size="sm" className="rounded-xl">Practice</Button>
-                    <Button size="sm" variant="secondary" className="rounded-xl">Resource</Button>
-                  </div>
-                </motion.div>
+                <SkillTooltip key={skill.skill}>
+                  <TooltipTrigger asChild>
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.22, delay: index * 0.02 }}
+                      className="premium-surface premium-card-hover p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{skill.skill}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">ARS {skill.ars.toFixed(1)}</p>
+                        </div>
+                        <RiskBadge risk={skill.risk} />
+                      </div>
+                      <ArsProgress className="mt-3" value={skill.ars} risk={skill.risk} />
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        {recommendation?.reason ?? "No urgent recommendation for this skill."}
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <Button size="sm" className="rounded-xl" onClick={() => openPractice(skill.skill)}>
+                          Practice
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="rounded-xl"
+                          onClick={() => openResource(skill.skill)}
+                          disabled={!getSkillLearningLink(skill.skill, "resource") && !getSkillLearningLink(skill.skill, "notes")}
+                        >
+                          Resource
+                        </Button>
+                      </div>
+                    </motion.div>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-56">
+                    {riskExplainability(skill)}
+                  </TooltipContent>
+                </SkillTooltip>
               )
             })}
           </section>
@@ -233,8 +273,16 @@ export default function SkillsPage() {
                         <td className="px-4 py-3 text-xs text-muted-foreground">{recommendation?.action ?? "No urgent action"}</td>
                         <td className="px-4 py-3">
                           <div className="flex gap-2">
-                            <Button size="sm" className="rounded-xl">Practice</Button>
-                            <Button size="sm" variant="outline" className="rounded-xl">Plan</Button>
+                            <Button size="sm" className="rounded-xl" onClick={() => openPractice(skill.skill)}>Practice</Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-xl"
+                              onClick={() => openResource(skill.skill)}
+                              disabled={!getSkillLearningLink(skill.skill, "resource") && !getSkillLearningLink(skill.skill, "notes")}
+                            >
+                              Resource
+                            </Button>
                           </div>
                         </td>
                       </tr>

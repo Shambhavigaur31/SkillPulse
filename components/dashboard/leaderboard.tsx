@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import { Trophy, Flame, Medal, Crown, TrendingUp } from "lucide-react"
+import { Trophy, Flame, Medal, Crown, TrendingUp, ShieldCheck, ArrowUpRight, ArrowDownRight } from "lucide-react"
 
 type LeaderboardUser = {
   rank: number
@@ -15,6 +15,21 @@ type LeaderboardUser = {
   streak: number
   bestStreak: number
   isCurrentUser: boolean
+}
+
+function recoveryScore(user: LeaderboardUser): number {
+  const streakWeight = Math.min(50, user.streak * 1.5)
+  const xpWeight = Math.min(50, Math.round(user.xpTotal / 300))
+  return Math.min(100, Math.round(streakWeight + xpWeight))
+}
+
+function stabilizedSkills(score: number): number {
+  return Math.max(4, Math.round(score / 6))
+}
+
+function weeklyMovement(user: LeaderboardUser): number {
+  const swing = Math.round((user.streak - user.bestStreak / 2) / 3)
+  return Math.max(-6, Math.min(6, swing))
 }
 
 const getRankStyle = (rank: number) => {
@@ -85,6 +100,20 @@ export function Leaderboard() {
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
+        <div className="grid gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-xs sm:grid-cols-3">
+          <div>
+            <p className="text-muted-foreground">Recovery score focus</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">Consistency + recovery velocity</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Skills stabilized</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">Derived from XP & streaks</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Weekly movement</p>
+            <p className="mt-1 text-sm font-semibold text-foreground">Rank momentum this period</p>
+          </div>
+        </div>
         {displayData.map((user) => (
           <div
             key={`${user.rank}-${user.handle}`}
@@ -113,7 +142,7 @@ export function Leaderboard() {
                   </Badge>
                 ) : null}
               </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <TrendingUp className="h-3 w-3" />
                   Level {Math.max(1, Math.floor(user.xpTotal / 500) + 1)}
@@ -122,12 +151,27 @@ export function Leaderboard() {
                   <Flame className="h-3 w-3 text-orange-500" />
                   {user.streak}
                 </span>
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="h-3 w-3 text-emerald-400" />
+                  {stabilizedSkills(recoveryScore(user))} stabilized
+                </span>
+                <span className="flex items-center gap-1">
+                  {weeklyMovement(user) >= 0 ? (
+                    <ArrowUpRight className="h-3 w-3 text-emerald-400" />
+                  ) : (
+                    <ArrowDownRight className="h-3 w-3 text-amber-400" />
+                  )}
+                  {weeklyMovement(user) >= 0 ? "+" : ""}{weeklyMovement(user)}
+                </span>
               </div>
             </div>
 
             <div className="text-right">
               <p className="font-bold text-foreground">{user.xpTotal.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">XP</p>
+              <p className="text-xs text-muted-foreground">XP • {recoveryScore(user)} recovery</p>
+              <p className="text-[10px] text-muted-foreground">
+                Top {Math.max(1, Math.round((user.rank / Math.max(1, displayData.length)) * 100))}%
+              </p>
             </div>
           </div>
         ))}
