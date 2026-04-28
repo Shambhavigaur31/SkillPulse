@@ -1,0 +1,43 @@
+{
+  "artifacts": {
+    "model_file": "lstm_model.h5",
+    "x_test_file": "X_test_norm.npy",
+    "y_test_file": "y_test_norm.npy",
+    "y_pred_source": "loaded",
+    "y_pred_file": "y_pred_test.npy"
+  },
+  "sample_count": 5265,
+  "test_mae": 0.013703752957411105,
+  "test_rmse": 0.0417477142028944,
+  "pearson_correlation": 0.9703047042233661,
+  "high_risk_threshold": 0.7,
+  "high_risk_precision_recall_f1": {
+    "precision": 0.9545454545454546,
+    "recall": 0.7720588235294118,
+    "f1": 0.853658536585366,
+    "tp": 105,
+    "fp": 5,
+    "fn": 31
+  },
+  "top_10_percent_predicted_risk_capture": {
+    "top_fraction": 0.1,
+    "k": 527,
+    "captured_true_high": 133,
+    "total_true_high": 136,
+    "capture_rate": 0.9779411764705882
+  },
+  "bucket_wise_mae": {
+    "safe_0.0_0.4": {
+      "count": 4971,
+      "mae": 0.008733833859005228
+    },
+    "at_risk_0.4_0.7": {
+      "count": 158,
+      "mae": 0.06329628579978701
+    },
+    "critical_0.7_1.0": {
+      "count": 136,
+      "mae": 0.1377467503771186
+    }
+  }
+}

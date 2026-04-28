@@ -1,0 +1,13 @@
+LSTM Test Evaluation (No Retraining)
+Model: lstm_model.h5
+Prediction source: loaded
+Samples: 5265
+Test MAE: 0.013704
+Test RMSE: 0.041748
+Pearson correlation: 0.970305
+High-risk (y_true>=0.7): precision=0.954545, recall=0.772059, f1=0.853659, tp=105, fp=5, fn=31
+Top 10% predicted-risk capture: captured=133, total_true_high=136, capture_rate=0.977941
+Bucket-wise MAE:
+  safe_0.0_0.4: count=4971, mae=0.008734
+  at_risk_0.4_0.7: count=158, mae=0.063296
+  critical_0.7_1.0: count=136, mae=0.137747

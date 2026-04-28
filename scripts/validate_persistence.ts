@@ -30,7 +30,7 @@ async function main() {
 
   const { upsertUser, saveInferenceRun, getLatestInferenceSnapshot } = await import("../lib/storage")
 
-  const userId = await upsertUser({ handle: "shambhavi31" })
+  const userId = await upsertUser({ handle: "aayushmaanmittal" })
   const modelVersion = `phase1-lstm-v1-validation-${Date.now()}`
 
   const summary = {

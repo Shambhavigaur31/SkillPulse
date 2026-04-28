@@ -2,6 +2,36 @@ import postgres from "postgres"
 
 let schemaReady = false
 
+const QUERY_MAX_RETRIES = Number.parseInt(process.env.DB_QUERY_MAX_RETRIES ?? "2", 10)
+const QUERY_RETRY_DELAY_MS = Number.parseInt(process.env.DB_QUERY_RETRY_DELAY_MS ?? "150", 10)
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isTemplateCall(value: unknown): value is TemplateStringsArray {
+  return Array.isArray(value) && Object.prototype.hasOwnProperty.call(value, "raw")
+}
+
+function isRetryableDbError(error: unknown): error is { code?: string; errno?: number; syscall?: string } {
+  if (!error || typeof error !== "object") return false
+  const candidate = error as { code?: string; errno?: number; syscall?: string }
+  const code = (candidate.code ?? "").toString().toUpperCase()
+
+  if (code === "ECONNRESET" || code === "EPIPE" || code === "ETIMEDOUT") {
+    return true
+  }
+
+  // PostgreSQL SQLSTATE classes for connection failures and transient startup issues.
+  return (
+    code.startsWith("08") ||
+    code === "57P01" ||
+    code === "57P02" ||
+    code === "57P03" ||
+    code === "53300"
+  )
+}
+
 function getDatabaseUrl(): string {
   const url = process.env.DATABASE_URL
   if (!url) {
@@ -11,20 +41,60 @@ function getDatabaseUrl(): string {
 }
 
 const globalForDb = globalThis as unknown as {
+  rawSql?: ReturnType<typeof postgres>
   sql?: ReturnType<typeof postgres>
 }
 
-export const sql =
-  globalForDb.sql ??
+const rawSql =
+  globalForDb.rawSql ??
   postgres(getDatabaseUrl(), {
     ssl: "require",
     max: 5,
     idle_timeout: 20,
+    connect_timeout: 10,
     prepare: false,
   })
 
+const sqlWithRetry =
+  globalForDb.sql ??
+  (new Proxy(rawSql, {
+    apply(target, thisArg, argArray: unknown[]) {
+      const [firstArg] = argArray
+      if (!isTemplateCall(firstArg)) {
+        return Reflect.apply(target, thisArg, argArray)
+      }
+
+      const run = async () => {
+        let attempt = 0
+        while (true) {
+          try {
+            return await Reflect.apply(target, thisArg, argArray)
+          } catch (error) {
+            if (!isRetryableDbError(error) || attempt >= QUERY_MAX_RETRIES) {
+              throw error
+            }
+
+            attempt += 1
+            schemaReady = false
+            const jitter = Math.floor(Math.random() * 50)
+            const waitMs = QUERY_RETRY_DELAY_MS * attempt + jitter
+            console.warn(
+              `[db] transient query error (${(error as { code?: string }).code ?? "unknown"}); retry ${attempt}/${QUERY_MAX_RETRIES} in ${waitMs}ms`
+            )
+            await delay(waitMs)
+          }
+        }
+      }
+
+      return run()
+    },
+  }) as ReturnType<typeof postgres>)
+
+export const sql = sqlWithRetry
+
 if (process.env.NODE_ENV !== "production") {
-  globalForDb.sql = sql
+  globalForDb.rawSql = rawSql
+  globalForDb.sql = sqlWithRetry
 }
 
 export async function ensureSchema(): Promise<void> {
